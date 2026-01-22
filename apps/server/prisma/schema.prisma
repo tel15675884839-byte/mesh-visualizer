@@ -1,0 +1,60 @@
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Building {
+  id        String   @id @default(uuid())
+  name      String
+  floors    Floor[]
+}
+
+model Floor {
+  id          String   @id @default(uuid())
+  buildingId  String?
+  building    Building? @relation(fields: [buildingId], references: [id])
+  level       Int      @default(1)
+  name        String
+  imageUrl    String?
+  scaleRatio  Float    @default(1.0)
+  altitude    Float    @default(3.0)
+  slots       Slot[]
+}
+
+model Slot {
+  id           String   @id @default(uuid())
+  floorId      String
+  floor        Floor    @relation(fields: [floorId], references: [id], onDelete: Cascade)
+  x            Float
+  y            Float
+  expectedType String
+  device       Device?
+}
+
+model Device {
+  id            String   @id @default(uuid())
+  mac           String   @unique
+  loopId        Int      @default(1)
+  type          String
+  status        String
+  slotId        String?  @unique
+  slot          Slot?    @relation(fields: [slotId], references: [id])
+  outgoingEdges Edge[]   @relation("SourceDevice")
+  incomingEdges Edge[]   @relation("TargetDevice")
+}
+
+model Edge {
+  id          String  @id @default(uuid())
+  sourceId    String
+  source      Device  @relation("SourceDevice", fields: [sourceId], references: [id], onDelete: Cascade)
+  targetId    String
+  target      Device  @relation("TargetDevice", fields: [targetId], references: [id], onDelete: Cascade)
+  rssi        Int?
+  linkQuality Int?
+  isNew       Boolean @default(false)
+}
