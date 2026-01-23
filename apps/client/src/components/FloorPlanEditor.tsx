@@ -105,7 +105,21 @@ const Connections = React.memo(({ activeFloor, currentScale, layerRef }: { activ
   );
 });
 
-const Nodes = React.memo(({ activeFloor, updatePosition, nodeScale, currentScale, baseFontSize, unassignedDevices, layerRef, isDeleteMode, onRemove, onContextMenu, onDragStart, onDragEnd }: any) => {
+const Nodes = React.memo(({ 
+    activeFloor, 
+    updatePosition, 
+    nodeScale, 
+    currentScale, 
+    baseFontSize, 
+    unassignedDevices,
+    layerRef,
+    isDeleteMode,
+    onRemove,
+    onContextMenu,
+    onDragStart, 
+    onDragEnd 
+}: any) => {
+  
   const getRole = (id: string) => {
     const dev = unassignedDevices.find((d: any) => d.mac === id || d.id === id);
     return (dev?.type || dev?.role || '').toLowerCase();
@@ -116,6 +130,7 @@ const Nodes = React.memo(({ activeFloor, updatePosition, nodeScale, currentScale
   };
   const getColor = (r: string) => r.includes('leader') ? '#ef4444' : r.includes('router') ? '#3b82f6' : '#22c55e';
 
+  // Imperative Line Update Logic
   const updateConnectedLines = (nodeId: string, x: number, y: number) => {
       const layer = layerRef.current;
       if (!layer) return;
@@ -145,6 +160,7 @@ const Nodes = React.memo(({ activeFloor, updatePosition, nodeScale, currentScale
         const role = getRole(node.id);
         const status = getStatus(node.id);
         const isMissing = status === 'missing';
+        
         const baseRadius = 10 * nodeScale;
         const constantTextScale = (1 / currentScale); 
         const labelText = node.description ? node.description : node.id.slice(-4);
@@ -155,19 +171,90 @@ const Nodes = React.memo(({ activeFloor, updatePosition, nodeScale, currentScale
             id={`node-${node.id}`}
             x={node.x}
             y={node.y}
-            draggable={!isDeleteMode}
-            opacity={isMissing ? 0.5 : 1}
-            onClick={(e) => { if (isDeleteMode) { e.cancelBubble = true; onRemove(activeFloor.id, node.id); } }}
-            onContextMenu={(e) => { e.evt.preventDefault(); e.cancelBubble = true; onContextMenu(e.evt, node.id, node.description); }}
-            onDragStart={(e) => { e.cancelBubble = true; onDragStart(node.id); }}
-            onDragMove={(e) => { e.cancelBubble = true; const newX = e.target.x(); const newY = e.target.y(); updateConnectedLines(node.id, newX, newY); }}
-            onDragEnd={(e) => { e.cancelBubble = true; onDragEnd(); updatePosition(activeFloor.id, node.id, e.target.x(), e.target.y()); }}
-            onMouseEnter={(e) => { if (isDeleteMode) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'crosshair'; } }}
-            onMouseLeave={(e) => { if (isDeleteMode) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'not-allowed'; } }}
+            draggable={!isDeleteMode && !isMissing} // LOCKED if missing
+            opacity={isMissing ? 0.8 : 1} // Slightly clearer ghost
+            onClick={(e) => {
+                if (isDeleteMode) {
+                    e.cancelBubble = true;
+                    onRemove(activeFloor.id, node.id);
+                }
+            }}
+            onContextMenu={(e) => {
+                e.evt.preventDefault();
+                // Disable context menu for missing? Or allow delete only?
+                // Letting it passthrough allows delete, which is good.
+                e.cancelBubble = true;
+                onContextMenu(e.evt, node.id, node.description);
+            }}
+            onDragStart={(e) => { 
+                e.cancelBubble = true; 
+                if(!isMissing) onDragStart(node.id); 
+            }}
+            onDragMove={(e) => {
+                e.cancelBubble = true;
+                if(!isMissing) {
+                    const newX = e.target.x();
+                    const newY = e.target.y();
+                    updateConnectedLines(node.id, newX, newY);
+                }
+            }}
+            onDragEnd={(e) => {
+                e.cancelBubble = true;
+                if(!isMissing) {
+                    onDragEnd();
+                    updatePosition(activeFloor.id, node.id, e.target.x(), e.target.y());
+                }
+            }}
+            onMouseEnter={(e) => { 
+                if (isDeleteMode) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'crosshair'; }
+                else if (isMissing) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'not-allowed'; }
+            }}
+            onMouseLeave={(e) => {
+               const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'default'; 
+            }}
           >
-            <Circle radius={baseRadius} fill={isMissing ? '#9ca3af' : getColor(role)} stroke={isDeleteMode ? 'red' : 'white'} strokeWidth={(isDeleteMode ? 3 : 2) / currentScale} shadowBlur={2} perfectDrawEnabled={false} dash={isMissing ? [4, 4] : undefined} />
-            <Text y={baseRadius + (5 / currentScale)} text={labelText} fontSize={baseFontSize} scaleX={constantTextScale} scaleY={constantTextScale} fill={isMissing ? '#6b7280' : '#111'} fontStyle="bold" align="center" width={200} offsetX={100} perfectDrawEnabled={false} />
-            {isMissing && <Text y={-baseRadius - (15/currentScale)} text="?" fontSize={14/currentScale} fill="red" fontStyle="bold" align="center" offsetX={4} />}
+            {/* Visuals: Circle */}
+            <Circle 
+                radius={baseRadius} 
+                fill={isMissing ? '#e5e7eb' : getColor(role)} // Light gray fill for ghost
+                stroke={isDeleteMode ? 'red' : (isMissing ? '#6b7280' : 'white')} // Dark gray stroke for ghost
+                strokeWidth={(isDeleteMode ? 3 : 2) / currentScale} 
+                shadowBlur={isMissing ? 0 : 2} 
+                perfectDrawEnabled={false}
+                dash={isMissing ? [5, 5] : undefined} // Dashed Border
+            />
+            
+            {/* Visuals: Text Label (Name) */}
+            <Text 
+                y={baseRadius + (5 / currentScale)} 
+                text={labelText} 
+                fontSize={baseFontSize}
+                scaleX={constantTextScale}
+                scaleY={constantTextScale}
+                fill={isMissing ? '#9ca3af' : '#111'} // Faded text
+                fontStyle={isMissing ? 'italic' : 'bold'}
+                align="center"
+                width={200}
+                offsetX={100}
+                perfectDrawEnabled={false}
+            />
+
+            {/* Visuals: Question Mark Center (Overlay) */}
+            {isMissing && (
+                <Text 
+                    x={0}
+                    y={0}
+                    text="?" 
+                    fontSize={14 * nodeScale} // Scale with node
+                    fill="#6b7280" 
+                    fontStyle="bold" 
+                    align="center" 
+                    verticalAlign="middle"
+                    offsetX={5 * nodeScale} // Approximate centering
+                    offsetY={7 * nodeScale}
+                    perfectDrawEnabled={false}
+                />
+            )}
           </Group>
         );
       })}

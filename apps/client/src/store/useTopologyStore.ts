@@ -88,16 +88,13 @@ export const useTopologyStore = create<TopologyStore>()(
         const oldMacs = new Set(oldLoopDevices.map(d => d.mac));
         const newMacs = new Set(newDevices.map(d => d.mac));
         
-        // Identify Dropped (Ghost Mode candidates)
-        const droppedMacs = oldLoopDevices.filter(d => !newMacs.has(d.mac)).map(d => d.mac);
-        if (droppedMacs.length > 0 && onRemoveNodes) onRemoveNodes(droppedMacs);
-
-        // Identify Missing (Keep them, mark as missing)
+        // Identify Missing (Old but not in New) -> Keep them, mark as missing
+        // CRITICAL CHANGE: Do NOT call onRemoveNodes here. We want them to stay on map as ghosts.
         const missingDevices = oldLoopDevices
             .filter(d => !newMacs.has(d.mac))
             .map(d => ({ ...d, status: 'missing' }));
 
-        // Process New/Updated Devices
+        // Identify New/Updated
         const processedNewDevices = newDevices.map(d => ({
             ...d,
             loopId,
@@ -105,6 +102,10 @@ export const useTopologyStore = create<TopologyStore>()(
             status: 'active'
         }));
 
+        // Edges: Only keep edges for active devices. Missing devices lose connections naturally
+        // or we can keep old edges if both ends are missing? 
+        // For visual clarity, usually ghost nodes don't have lines.
+        // Let's replace edges with NEW edges only. Ghosts become isolated dots.
         const otherEdges = state.edges.filter(e => e.loopId !== loopId);
         const taggedEdges = newEdges.map(e => ({ ...e, loopId }));
 
