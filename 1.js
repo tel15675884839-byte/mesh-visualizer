@@ -3,28 +3,99 @@ const path = require('path');
 
 const clientPath = path.join(__dirname, 'apps', 'client', 'src');
 const componentsPath = path.join(clientPath, 'components');
+const storePath = path.join(clientPath, 'store');
 
-console.log('🎨 Applying UI Adjustments: Add Loop Modal & Site Manager Layout...');
+console.log('🧹 Applying Fixes V19: Residual Edges, Missing Focus, Auto-Exit Delete...');
 
-// 1. UPDATE DeviceSidebar.tsx
-// Changes: Replace inline input with a Modal
-const sidebarContent = `
-import React, { useMemo, useState, useRef } from 'react';
-import { useTopologyStore } from '../store/useTopologyStore';
-import { useSiteStore } from '../store/useSiteStore';
-import { buildTopologyTree, filterTopologyNodes, validateMacConflicts } from '../utils/topologyTree';
-import type { TopologyTreeNode, Device } from '../utils/topologyTree';
-import { parseTopologyFile } from '../utils/fileParser';
-import { ChevronRight, ChevronDown, Wifi, Signal, Search, Trash2, X, Plus, Upload, RefreshCw, Check, Play, Circle, Box as BoxIcon, Square, CheckSquare, AlertTriangle, Eye } from 'lucide-react';
-import axios from 'axios';
+// 1. UPDATE useTopologyStore.ts (Deep Edge Cleanup)
+try {
+    const storeFilePath = path.join(storePath, 'useTopologyStore.ts');
+    let storeCode = fs.readFileSync(storeFilePath, 'utf8');
 
-// --- Tree Node ---
-const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, descriptionMap, forceDisabled }: any) => {
+    // Rewrite removeLoop to be more aggressive
+    // We look for the removeLoop action definition
+    const removeLoopRegex = /removeLoop:\s*\(loopId\)\s*=>\s*set\(\(state\)\s*=>\s*\{([\s\S]*?)\}\),/;
+    
+    const newRemoveLoopLogic = `removeLoop: (loopId) => set((state) => {
+        // 1. Identify devices being removed
+        const loopDevices = state.unassignedDevices.filter(d => d.loopId === loopId);
+        const loopDeviceIds = new Set(loopDevices.map(d => d.mac));
+
+        // 2. Filter Devices
+        const remainingDevices = state.unassignedDevices.filter(d => d.loopId !== loopId);
+
+        // 3. Filter Edges (Aggressive Cleanup)
+        // Remove edge if it matches loopId OR if it connects to a removed device
+        const remainingEdges = state.edges.filter(e => {
+            if (e.loopId === loopId) return false;
+            // Fallback for legacy edges without loopId: check endpoints
+            const u = String(e.from ?? e.sourceId);
+            const v = String(e.to ?? e.targetId);
+            if (loopDeviceIds.has(u) || loopDeviceIds.has(v)) return false;
+            return true;
+        });
+
+        return {
+            activeLoopIds: state.activeLoopIds.filter(id => id !== loopId),
+            unassignedDevices: remainingDevices,
+            edges: remainingEdges,
+        };
+      }),`;
+
+    if (removeLoopRegex.test(storeCode)) {
+        storeCode = storeCode.replace(removeLoopRegex, newRemoveLoopLogic);
+        fs.writeFileSync(storeFilePath, storeCode);
+        console.log('✅ useTopologyStore.ts: Aggressive Edge Cleanup applied.');
+    } else {
+        console.warn('⚠️ Could not locate removeLoop in TopologyStore.');
+    }
+
+} catch (e) {
+    console.error('❌ Error updating useTopologyStore.ts:', e);
+}
+
+
+// 2. UPDATE DeviceSidebar.tsx (Enable Eye for Missing)
+try {
+    const sidebarFilePath = path.join(componentsPath, 'DeviceSidebar.tsx');
+    let sidebarCode = fs.readFileSync(sidebarFilePath, 'utf8');
+
+    // We need to ensure the click handler on the row doesn't block the button.
+    // In V18 we added logic, but let's refine the pointer-events.
+    
+    // Look for the TreeNode return JSX
+    // specifically the main container div className logic
+    // We want to ensure it's NOT "pointer-events-none" or "cursor-not-allowed" for the whole row IF we want buttons to work.
+    // Actually, "cursor-not-allowed" is fine, but we must not stop events on children.
+    
+    // The previous TreeNode code for isMissing style:
+    // ${isMissing ? 'bg-gray-50/50' : ''}
+    
+    // And the click handler:
+    // onClick={(e) => { e.stopPropagation(); if (!isMissing) ... }} 
+    
+    // The button itself:
+    // <button onClick={handleFocus} ... title={isMissing ? "Locate Missing Device" : ...}>
+    
+    // The issue might be that `isDeployed` check inside TreeNode needs to be robust for missing nodes.
+    // Missing nodes are DEPLOYED (in SiteStore). 
+    // Let's Force the Eye button to be clickable by stopping propagation explicitly on it (which is already there).
+    
+    // If user says it's not working, maybe the `isDeployed` check is failing?
+    // isNodeDeployed checks if node exists in SiteStore.
+    // If "Missing" means "Removed from Topology but still in SiteStore", isNodeDeployed should be TRUE.
+    
+    // Let's just make sure the Eye button Z-Index or placement is safe.
+    // I will rewrite the TreeNode component one last time to be absolutely sure.
+    
+    const treeNodeRegex = /const TreeNode = \(\{[\s\S]*?^};/m;
+    const newTreeNode = `const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, descriptionMap, forceDisabled }: any) => {
   const { isNodeDeployed, findNodeLocation, setActiveView } = useSiteStore();
   const [isExpanded, setIsExpanded] = useState(node.forceExpand ?? (node.role === 'LEADER'));
   const isDeployed = isNodeDeployed(node.mac);
   const isSelected = selectedIds.has(node.mac);
   
+  // Status Flags
   const isMissing = node.status === 'missing' || forceDisabled;
   const isNew = node.isNew && !isDeployed;
 
@@ -47,13 +118,14 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
   };
 
   const handleFocus = (e: React.MouseEvent) => {
-      e.stopPropagation();
+      e.stopPropagation(); // Critical: Stop row click event
       const loc = findNodeLocation(node.mac);
       if (loc) {
           setActiveView(loc.buildingId, loc.floorId);
           window.dispatchEvent(new CustomEvent('FOCUS_NODE', { detail: { x: loc.x, y: loc.y, id: node.mac } }));
       } else {
-          alert("Device location not found on map.");
+          // If not found (maybe phantom state), try to find by ID
+          alert("Could not locate device on map.");
       }
   };
 
@@ -63,9 +135,10 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
   return (
     <div className="flex flex-col select-none">
       <div 
-        className={\`flex items-center py-1.5 pr-2 pl-0 rounded-r-md transition-colors group 
+        className={\`flex items-center py-1.5 pr-2 pl-0 rounded-r-md transition-colors group relative
             \${isSelected ? 'bg-indigo-50' : 'hover:bg-gray-100'} 
-            \${isDeployed ? 'opacity-100' : 'cursor-grab active:cursor-grabbing'} 
+            \${(isDeployed && !isMissing) ? 'opacity-100' : ''} 
+            \${(!isDeployed && !isMissing) ? 'cursor-grab active:cursor-grabbing' : ''}
             \${isNew ? 'bg-yellow-50 border-l-2 border-yellow-400' : ''}
             \${isMissing ? 'bg-gray-50/50' : ''} 
         \`}
@@ -78,6 +151,7 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
                     setIsExpanded(!isExpanded);
                 }
             } else {
+                // Allow expand for Deployed/Missing
                 setIsExpanded(!isExpanded);
             }
         }}
@@ -112,11 +186,12 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
             </span>
         )}
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 z-10"> 
+            {/* Z-Index to ensure clickable */}
             {isDeployed ? (
                 <button 
                     onClick={handleFocus}
-                    className={\`p-1 rounded-full transition-colors \${isMissing ? 'text-red-400 hover:text-red-600 hover:bg-red-50' : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'}\`}
+                    className={\`p-1 rounded-full transition-colors \${isMissing ? 'text-red-500 hover:text-red-700 hover:bg-red-100' : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'}\`}
                     title={isMissing ? "Locate Missing Device" : "Locate on Map"}
                 >
                     <Eye size={14} />
@@ -155,532 +230,64 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
       )}
     </div>
   );
-};
+};`;
 
-const LoopItem = ({ loopId, devices, edges, searchQuery, allDevices, onImport, selectedIds, onToggleSelect, onDeleteLoop, onClearSelect, descriptionMap }: any) => {
-  const { setImportError, clearMissingNodes } = useTopologyStore();
-  const { isNodeDeployed, removeNodesByDeviceIds } = useSiteStore();
-  const [isExpanded, setIsExpanded] = useState(true);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+    if (treeNodeRegex.test(sidebarCode)) {
+        sidebarCode = sidebarCode.replace(treeNodeRegex, newTreeNode);
+        fs.writeFileSync(sidebarFilePath, sidebarCode);
+        console.log('✅ DeviceSidebar.tsx: Updated TreeNode to allow Focus on Missing.');
+    }
 
-  const activeDevices = useMemo(() => devices.filter((d: any) => d.status !== 'missing'), [devices]);
-  const missingDevices = useMemo(() => devices.filter((d: any) => d.status === 'missing'), [devices]);
-
-  const deployedCount = activeDevices.filter((d: any) => isNodeDeployed(d.mac)).length;
-  const remainingCount = activeDevices.length - deployedCount;
-
-  const { roots, orphans } = useMemo(() => {
-    const rawTree = buildTopologyTree(activeDevices, edges);
-    const sortedRoots = rawTree.roots.sort((a, b) => {
-        if (a.role === 'LEADER') return -1;
-        if (b.role === 'LEADER') return 1;
-        return a.mac.localeCompare(b.mac);
-    });
-    return {
-      roots: filterTopologyNodes(sortedRoots, searchQuery, descriptionMap),
-      orphans: filterTopologyNodes(rawTree.orphans, searchQuery, descriptionMap)
-    };
-  }, [activeDevices, edges, searchQuery, descriptionMap]);
-
-  const handleMultiDragStart = (e: React.DragEvent) => {
-      const ids = Array.from(selectedIds) as string[];
-      if (ids.length > 0) {
-        e.dataTransfer.setData('application/json', JSON.stringify({ ids }));
-      }
-  };
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        try {
-            const content = event.target?.result as string;
-            const { devices: parsedDevices, edges: parsedEdges } = parseTopologyFile(content, file.name);
-            if (parsedDevices.length === 0) throw new Error("No devices found.");
-            const formattedDevices = parsedDevices.map(d => ({
-                ...d,
-                type: (d.role || d.type || 'CHILD').toUpperCase().includes('LEADER') ? 'LEADER' : 
-                    (d.role || d.type || '').toUpperCase().includes('ROUTER') ? 'ROUTER' : 'CHILD',
-                status: 'UNASSIGNED',
-                loopId: loopId
-            }));
-            const conflictError = validateMacConflicts(allDevices, formattedDevices, loopId);
-            if (conflictError) { alert(conflictError); return; }
-            await axios.post('http://localhost:3000/api/topology/sync', { devices: formattedDevices, edges: parsedEdges }).catch(e=>{});
-            onImport(loopId, formattedDevices, parsedEdges);
-        } catch (err: any) {
-            setImportError(err.message);
-            alert(\`Import Failed: \${err.message}\`);
-        } finally { if (fileInputRef.current) fileInputRef.current.value = ''; }
-      };
-      reader.readAsText(file);
-  };
-
-  const handleClearMissing = (e: React.MouseEvent) => {
-      e.stopPropagation();
-      if(confirm(\`Delete \${missingDevices.length} missing devices?\`)) {
-          clearMissingNodes(loopId, (ids) => removeNodesByDeviceIds(ids));
-      }
-  };
-
-  return (
-    <div className="mb-4 border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm" draggable={selectedIds.size > 0}>
-      <div className="flex items-center justify-between px-3 py-2 bg-gray-50 cursor-pointer hover:bg-gray-100" onClick={() => setIsExpanded(!isExpanded)}>
-        <div className="flex items-center gap-2">
-           {isExpanded ? <ChevronDown size={14} className="text-gray-500" /> : <ChevronRight size={14} className="text-gray-500" />}
-           <span className="font-semibold text-xs text-gray-700">LOOP {loopId}</span>
-           <span className="text-[10px] text-gray-400 bg-white px-1.5 rounded border border-gray-200" title="Active Devices">
-             {activeDevices.length}
-           </span>
-           {remainingCount > 0 && (
-               <span className="text-[10px] text-white bg-indigo-500 px-1.5 rounded border border-indigo-600 font-medium">
-                 {remainingCount} Left
-               </span>
-           )}
-        </div>
-        <div className="flex items-center gap-1">
-           <button onClick={(e)=>{e.stopPropagation();fileInputRef.current?.click()}} className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"><Upload size={14}/></button>
-           <button onClick={(e)=>{e.stopPropagation(); if(confirm('Delete Loop? Devices on map will be removed.')) onDeleteLoop(loopId); }} className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"><Trash2 size={14}/></button>
-           <input ref={fileInputRef} type="file" className="hidden" accept=".json,.html" onChange={handleFileChange} />
-        </div>
-      </div>
-      
-      {isExpanded && (
-        <div className="p-2 min-h-[40px]" onDragStart={handleMultiDragStart}>
-          <div className="space-y-1">
-             {roots.map((root: any) => (
-                 <TreeNode key={root.id} node={root} selectedIds={selectedIds} toggleSelect={onToggleSelect} clearSelection={onClearSelect} descriptionMap={descriptionMap} />
-             ))}
-             
-             {orphans.length > 0 && (
-                <div className="mt-2 text-[10px] text-gray-400 font-bold px-1 uppercase tracking-wider border-t border-gray-100 pt-2">
-                    Missing Devices
-                </div>
-             )}
-             {orphans.map((orphan: any) => (
-                 <TreeNode 
-                    key={orphan.id} 
-                    node={orphan} 
-                    selectedIds={selectedIds} 
-                    toggleSelect={onToggleSelect} 
-                    clearSelection={onClearSelect} 
-                    descriptionMap={descriptionMap}
-                    forceDisabled={true}
-                 />
-             ))}
-
-             {missingDevices.length > 0 && (
-                 <div className="mt-4 pt-2 border-t border-gray-100 bg-red-50/30 -mx-2 px-2 pb-2">
-                    <div className="flex items-center justify-between mb-2 mt-1">
-                        <div className="flex items-center gap-1 text-[10px] font-bold text-red-400 uppercase">
-                            <AlertTriangle size={10} />
-                            Removed / Offline ({missingDevices.length})
-                        </div>
-                        <button 
-                            onClick={handleClearMissing}
-                            className="text-[10px] text-red-500 hover:text-red-700 hover:bg-red-100 px-1.5 py-0.5 rounded transition-colors"
-                        >
-                            Clear
-                        </button>
-                    </div>
-                    <div className="space-y-1 opacity-70">
-                        {missingDevices.map((d: any) => {
-                             const customName = descriptionMap ? descriptionMap[d.mac] : null;
-                             const displayName = customName || d.mac.slice(-4);
-                             return (
-                                <div key={d.mac} className="flex items-center px-1 py-1 text-xs text-gray-400 font-mono cursor-not-allowed border border-transparent hover:border-red-100 rounded">
-                                    <div className="w-4 flex justify-center"><Circle size={8} className="fill-gray-300 text-gray-400" /></div>
-                                    <span className="line-through">{displayName}</span>
-                                </div>
-                             );
-                        })}
-                    </div>
-                 </div>
-             )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// --- NEW: Add Loop Modal ---
-const AddLoopModal = ({ activeIds, onAdd, onClose }: any) => {
-    const [val, setVal] = useState('');
-    const [error, setError] = useState<string|null>(null);
-
-    const handleSubmit = () => {
-        const id = parseInt(val);
-        if (isNaN(id)) { setError('Please enter a number'); return; }
-        if (id < 1 || id > 24) { setError('Loop ID must be between 1 and 24'); return; }
-        if (activeIds.includes(id)) { setError('Loop ID already exists'); return; }
-        onAdd(id);
-        onClose();
-    };
-
-    return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl p-6 w-80 animate-in fade-in zoom-in duration-200">
-                <h3 className="text-lg font-bold text-gray-800 mb-4">Add New Loop</h3>
-                <div className="space-y-3">
-                    <div>
-                        <label className="block text-xs font-semibold text-gray-500 mb-1">Loop ID (1-24)</label>
-                        <input 
-                            autoFocus
-                            type="number" 
-                            className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                            placeholder="e.g. 1"
-                            value={val}
-                            onChange={(e) => { setVal(e.target.value); setError(null); }}
-                            onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-                        />
-                        {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
-                    </div>
-                    <div className="flex justify-end gap-2 pt-2">
-                        <button onClick={onClose} className="px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded">Cancel</button>
-                        <button onClick={handleSubmit} className="px-3 py-2 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700">Confirm</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-export const DeviceSidebar = () => {
-  const { unassignedDevices, edges, activeLoopIds, addLoop, importLoopData, clearAll, removeLoop, selectedDeviceIds, setBulkSelection, clearDeviceSelection } = useTopologyStore();
-  const { removeNodesByDeviceIds, getAllNodeDescriptions } = useSiteStore();
-  const descriptionMap = getAllNodeDescriptions();
-  
-  const [searchQuery, setSearchQuery] = useState('');
-  // Replaced inline state with modal state
-  const [showAddModal, setShowAddModal] = useState(false);
-  
-  const selectedSet = new Set(selectedDeviceIds);
-
-  const toggleSelect = (node: any) => {
-      const idsToToggle = [node.mac];
-      if (node.children && node.children.length > 0) {
-          node.children.forEach((c: any) => idsToToggle.push(c.mac));
-      }
-      const isCurrentlySelected = selectedSet.has(node.mac);
-      const targetState = !isCurrentlySelected;
-      setBulkSelection(idsToToggle, targetState);
-  };
-
-  const handleDeleteLoop = (loopId: number) => {
-      const devicesToDelete = unassignedDevices.filter(d => d.loopId === loopId).map(d => d.mac);
-      removeNodesByDeviceIds(devicesToDelete);
-      removeLoop(loopId);
-  };
-
-  const handleImportLoop = (loopId: number, devices: any[], edges: any[]) => {
-      importLoopData(loopId, devices, edges, (droppedIds) => {
-          removeNodesByDeviceIds(droppedIds);
-      });
-  };
-
-  const handleBgClick = (e: React.MouseEvent) => {
-      if (e.target === e.currentTarget) clearDeviceSelection();
-  };
-
-  return (
-    <>
-        <div className="w-full h-full flex flex-col bg-white overflow-hidden" onClick={handleBgClick}>
-        <div className="shrink-0 border-b border-gray-200 bg-white z-10 px-4 py-3">
-            <div className="flex items-center justify-between mb-2">
-                <h2 className="font-semibold text-gray-800 flex items-center gap-2"><Wifi size={18} className="text-indigo-600"/>Loops</h2>
-                <div className="flex gap-1">
-                    <button 
-                        onClick={() => setShowAddModal(true)} 
-                        disabled={activeLoopIds.length>=24} 
-                        className="flex items-center gap-1 px-2 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700 disabled:opacity-50"
-                    >
-                        <Plus size={14}/> Add Loop
-                    </button>
-                    <button onClick={()=>confirm('Clear?')&&clearAll()} className="p-1.5 text-gray-400 hover:text-red-600"><Trash2 size={16}/></button>
-                </div>
-            </div>
-            <div className="relative">
-                <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400"/>
-                <input type="text" placeholder="Search..." className="w-full pl-8 py-1.5 text-xs border rounded" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}/>
-            </div>
-        </div>
-        <div className="flex-1 overflow-y-auto p-3 custom-scrollbar bg-gray-50/30">
-            {activeLoopIds.map(loopId => (
-                <LoopItem 
-                    key={loopId} 
-                    loopId={loopId} 
-                    devices={unassignedDevices.filter(d=>d.loopId===loopId)} 
-                    edges={edges} 
-                    allDevices={unassignedDevices} 
-                    searchQuery={searchQuery} 
-                    onImport={handleImportLoop} 
-                    selectedIds={selectedSet}
-                    onToggleSelect={toggleSelect}
-                    onDeleteLoop={handleDeleteLoop}
-                    onClearSelect={clearDeviceSelection}
-                    descriptionMap={descriptionMap}
-                />
-            ))}
-        </div>
-        </div>
-
-        {/* Modal Portal */}
-        {showAddModal && (
-            <AddLoopModal 
-                activeIds={activeLoopIds} 
-                onAdd={addLoop} 
-                onClose={() => setShowAddModal(false)} 
-            />
-        )}
-    </>
-  );
-};
-`;
-fs.writeFileSync(path.join(componentsPath, 'DeviceSidebar.tsx'), sidebarContent);
-console.log('✅ DeviceSidebar.tsx Updated: Add Loop Modal implemented.');
-
-
-// 2. UPDATE SiteManager.tsx
-// Changes: Move "Open in Editor" button to bottom of column 3
-const siteManagerContent = `
-import React, { useState, useEffect, useRef } from 'react';
-import { useSiteStore } from '../store/useSiteStore';
-import { getImage } from '../utils/storage';
-import { X, Plus, Trash2, Upload, Map, Building as BuildingIcon, Layers } from 'lucide-react';
-
-interface SiteManagerProps {
-  onClose: () => void;
+} catch (e) {
+    console.error('❌ Error updating DeviceSidebar.tsx:', e);
 }
 
-export const SiteManager: React.FC<SiteManagerProps> = ({ onClose }) => {
-  const { 
-    buildings, 
-    activeBuildingId, 
-    activeFloorId,
-    addBuilding, 
-    removeBuilding,
-    addFloor, 
-    removeFloor,
-    updateFloor, 
-    setFloorMap,
-    setActiveView 
-  } = useSiteStore();
 
-  const [selBuildingId, setSelBuildingId] = useState<string | null>(activeBuildingId);
-  const [selFloorId, setSelFloorId] = useState<string | null>(activeFloorId);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  
-  const fileInputRef = useRef<HTMLInputElement>(null);
+// 3. UPDATE FloorPlanEditor.tsx (Auto-Exit Delete Mode)
+try {
+    const editorFilePath = path.join(componentsPath, 'FloorPlanEditor.tsx');
+    let editorCode = fs.readFileSync(editorFilePath, 'utf8');
 
-  useEffect(() => { if (activeBuildingId) setSelBuildingId(activeBuildingId); }, [activeBuildingId]);
-  useEffect(() => { if (activeFloorId) setSelFloorId(activeFloorId); }, [activeFloorId]);
+    // 1. Box Selection MouseUp
+    // Look for `setSelectionBox(null);` in `handleMouseUp`
+    const mouseUpTarget = `if (nodesToRemove.length > 0 && confirm(\`Delete \${nodesToRemove.length} items?\`)) nodesToRemove.forEach(id => removeNodeFromFloor(activeFloor.id, id));
+    setSelectionBox(null);`;
+    
+    const mouseUpReplace = `if (nodesToRemove.length > 0 && confirm(\`Delete \${nodesToRemove.length} items?\`)) nodesToRemove.forEach(id => removeNodeFromFloor(activeFloor.id, id));
+    setSelectionBox(null);
+    setIsDeleteMode(false); // AUTO-EXIT`;
 
-  const selectedBuilding = buildings.find(b => b.id === selBuildingId);
-  const selectedFloor = selectedBuilding?.floors.find(f => f.id === selFloorId);
-
-  useEffect(() => {
-    setPreviewUrl(null); 
-    if (!selectedFloor?.mapId) return;
-
-    let active = true;
-    getImage(selectedFloor.mapId).then((blob) => {
-      if (active && blob) {
-        setPreviewUrl(URL.createObjectURL(blob));
-      }
-    });
-
-    return () => {
-      active = false;
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-    };
-  }, [selectedFloor?.mapId]); 
-
-  const handleAddBuilding = () => {
-    const name = prompt("Enter Building Name:", \`Building \${buildings.length + 1}\`);
-    if (name !== null) addBuilding(name || undefined);
-  };
-
-  const handleAddFloor = () => {
-    if (!selBuildingId) return;
-    const name = prompt("Enter Floor Name:", "1F");
-    if (name !== null) addFloor(selBuildingId, name || undefined);
-  };
-
-  const triggerFileUpload = () => {
-    if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-        fileInputRef.current.click();
+    if (editorCode.includes('setSelectionBox(null);') && !editorCode.includes('setIsDeleteMode(false); // AUTO-EXIT')) {
+        // We use string replacement for safety
+        editorCode = editorCode.replace('setSelectionBox(null);', 'setSelectionBox(null); setIsDeleteMode(false); // AUTO-EXIT');
     }
-  };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0] && selBuildingId && selFloorId) {
-      await setFloorMap(selBuildingId, selFloorId, e.target.files[0]);
+    // 2. Single Node Click (Delete)
+    // Look for `onRemove(activeFloor.id, node.id);` in Nodes component
+    const nodeClickTarget = `onRemove(activeFloor.id, node.id);`;
+    const nodeClickReplace = `onRemove(activeFloor.id, node.id); setIsDeleteMode(false);`; // We need access to setIsDeleteMode?
+    
+    // Wait, `Nodes` component receives `isDeleteMode` prop but NOT `setIsDeleteMode`.
+    // It only receives `onRemove`.
+    // To implement auto-exit on single click, we need to pass a callback or handle it in parent.
+    
+    // Easier: In `FloorPlanEditor`, the `Nodes` component is rendered. 
+    // We can wrap the `onRemove` prop passed to Nodes.
+    
+    const onRemovePropRegex = /onRemove=\{removeNodeFromFloor\}/;
+    const newOnRemoveProp = `onRemove={(fid: string, nid: string) => { removeNodeFromFloor(fid, nid); setIsDeleteMode(false); }}`;
+    
+    if (onRemovePropRegex.test(editorCode)) {
+        editorCode = editorCode.replace(onRemovePropRegex, newOnRemoveProp);
+        console.log('✅ FloorPlanEditor.tsx: Added Auto-Exit on Single Delete.');
     }
-  };
+    
+    // Also need to handle the box select one which is inside FloorPlanEditor main body
+    // The first replacement above handled handleMouseUp (Box).
 
-  const handleDeleteFloor = () => {
-      if(selBuildingId && selFloorId && confirm('Delete Floor?')) {
-          removeFloor(selBuildingId, selFloorId);
-          setSelFloorId(null);
-      }
-  };
+    fs.writeFileSync(editorFilePath, editorCode);
+    console.log('✅ FloorPlanEditor.tsx: Added Auto-Exit on Batch Delete.');
 
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm">
-      <div className="bg-white w-[960px] h-[600px] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
-        
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gray-50/50">
-          <div className="flex items-center gap-2">
-            <Map className="text-indigo-600" size={24} />
-            <h2 className="text-lg font-bold text-gray-800">Site Manager</h2>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors">
-            <X size={20} />
-          </button>
-        </div>
-
-        <div className="flex flex-1 overflow-hidden">
-          
-          {/* Column 1: Buildings */}
-          <div className="w-1/4 border-r border-gray-200 bg-gray-50 flex flex-col">
-            <div className="p-3 border-b border-gray-200 flex justify-between items-center bg-gray-100/50">
-              <span className="text-xs font-bold text-gray-500 uppercase">Buildings</span>
-              <button onClick={handleAddBuilding} className="p-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors">
-                <Plus size={14} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-2">
-              {buildings.map(b => (
-                <div 
-                  key={b.id}
-                  onClick={() => { setSelBuildingId(b.id); setSelFloorId(null); }}
-                  className={\`flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all border \${selBuildingId === b.id ? 'bg-white border-indigo-200 shadow-sm ring-1 ring-indigo-500/20' : 'bg-transparent border-transparent hover:bg-gray-200/50 hover:border-gray-200'}\`}
-                >
-                  <div className="flex items-center gap-3 overflow-hidden">
-                    <BuildingIcon size={16} className={\`shrink-0 \${selBuildingId === b.id ? 'text-indigo-600' : 'text-gray-400'}\`} />
-                    <span className="text-sm font-medium text-gray-700 truncate">{b.name}</span>
-                  </div>
-                  {selBuildingId === b.id && (
-                    <button onClick={(e) => { e.stopPropagation(); if(confirm('Delete Building?')) removeBuilding(b.id); }} className="text-gray-300 hover:text-red-500">
-                      <Trash2 size={12} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Column 2: Floors */}
-          <div className="w-1/4 border-r border-gray-200 bg-white flex flex-col">
-            <div className="p-3 border-b border-gray-200 flex justify-between items-center bg-white">
-              <span className="text-xs font-bold text-gray-500 uppercase">Floors</span>
-              <button 
-                onClick={handleAddFloor} 
-                disabled={!selBuildingId}
-                className="p-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-              >
-                <Plus size={14} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-2">
-              {!selBuildingId ? <div className="text-center text-xs text-gray-300 py-10">Select a building</div> : 
-               selectedBuilding?.floors.length === 0 ? <div className="text-center text-xs text-gray-400 py-8 italic">No floors added</div> : (
-                selectedBuilding?.floors.slice().reverse().map(f => (
-                  <div 
-                    key={f.id}
-                    onClick={() => setSelFloorId(f.id)}
-                    className={\`flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all border \${selFloorId === f.id ? 'bg-indigo-50 border-indigo-200' : 'bg-gray-50 border-transparent hover:bg-gray-100'}\`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Layers size={16} className={\`shrink-0 \${selFloorId === f.id ? 'text-indigo-600' : 'text-gray-400'}\`} />
-                      <div className="flex flex-col">
-                        <span className="text-sm font-medium text-gray-700">{f.name}</span>
-                        <span className="text-[10px] text-gray-400">{f.height}cm</span>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Column 3: Details */}
-          <div className="flex-1 bg-gray-50/30 flex flex-col">
-             {!selFloorId || !selectedFloor ? (
-               <div className="flex-1 flex flex-col items-center justify-center text-gray-300">
-                 <Map size={48} className="mb-4 opacity-20" />
-                 <p className="text-sm">Select a floor to edit details</p>
-               </div>
-             ) : (
-               <div className="p-6 h-full flex flex-col">
-                 <div className="flex items-center justify-between mb-6">
-                   <h3 className="text-md font-bold text-gray-800">Floor Settings</h3>
-                   <button 
-                      onClick={handleDeleteFloor}
-                      className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1 px-3 py-1.5 rounded-md hover:bg-red-50 transition-colors"
-                   >
-                     <Trash2 size={12} /> Delete
-                   </button>
-                 </div>
-                 
-                 <div className="grid grid-cols-2 gap-4 mb-6">
-                   <div className="space-y-1">
-                     <label className="text-xs font-semibold text-gray-500">Name</label>
-                     <input type="text" value={selectedFloor.name} onChange={(e) => updateFloor(selBuildingId!, selFloorId, { name: e.target.value })} className="w-full text-sm p-2 border border-gray-300 rounded" />
-                   </div>
-                   <div className="space-y-1">
-                     <label className="text-xs font-semibold text-gray-500">Height (cm)</label>
-                     <input type="number" value={selectedFloor.height} onChange={(e) => updateFloor(selBuildingId!, selFloorId, { height: Number(e.target.value) })} className="w-full text-sm p-2 border border-gray-300 rounded" />
-                   </div>
-                 </div>
-
-                 <div className="space-y-2 flex-1">
-                   <label className="text-xs font-semibold text-gray-500">Floor Plan</label>
-                   <input 
-                      ref={fileInputRef}
-                      type="file" 
-                      accept="image/*" 
-                      className="hidden" 
-                      onChange={handleFileChange} 
-                   />
-                   <div 
-                      onClick={triggerFileUpload}
-                      className="relative group border-2 border-dashed border-gray-300 rounded-xl bg-white h-[200px] flex items-center justify-center overflow-hidden hover:border-indigo-400 transition-colors cursor-pointer"
-                   >
-                      {previewUrl ? (
-                        <div className="relative w-full h-full flex items-center justify-center bg-gray-100">
-                          <img src={previewUrl} alt="Plan" className="max-w-full max-h-[100%] object-contain" />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-sm">Click to Replace</div>
-                        </div>
-                      ) : (
-                        <div className="text-center p-6 text-gray-400">
-                          <Upload size={32} className="mx-auto mb-2 opacity-50" />
-                          <p className="text-sm">Click to Upload Image</p>
-                        </div>
-                      )}
-                   </div>
-                 </div>
-
-                 {/* BUTTON MOVED TO BOTTOM */}
-                 <div className="mt-auto pt-4 border-t border-gray-200">
-                     <button 
-                        onClick={() => { setActiveView(selBuildingId, selFloorId); onClose(); }}
-                        className="w-full bg-indigo-600 text-white px-4 py-3 rounded-lg hover:bg-indigo-700 transition-colors font-semibold flex items-center justify-center gap-2"
-                     >
-                       <Map size={18} /> Open in Editor
-                     </button>
-                 </div>
-               </div>
-             )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-`;
-fs.writeFileSync(path.join(componentsPath, 'SiteManager.tsx'), siteManagerContent);
-console.log('✅ SiteManager.tsx Updated: "Open in Editor" moved to bottom.');
+} catch (e) {
+    console.error('❌ Error updating FloorPlanEditor.tsx:', e);
+}

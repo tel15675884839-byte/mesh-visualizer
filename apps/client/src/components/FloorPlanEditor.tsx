@@ -462,7 +462,7 @@ export const FloorPlanEditor = () => {
     const nodesToRemove: string[] = [];
     activeFloor.nodes.forEach((n: any) => { if (n.x >= x1 && n.x <= x2 && n.y >= y1 && n.y <= y2) nodesToRemove.push(n.id); });
     if (nodesToRemove.length > 0 && confirm(`Delete ${nodesToRemove.length} items?`)) nodesToRemove.forEach(id => removeNodeFromFloor(activeFloor.id, id));
-    setSelectionBox(null);
+    setSelectionBox(null); setIsDeleteMode(false); // AUTO-EXIT
   };
 
   const handleContextMenu = (evt: any, nodeId: string, description?: string) => setContextMenu({ visible: true, x: evt.clientX, y: evt.clientY, nodeId, currentDesc: description });
@@ -511,7 +511,7 @@ export const FloorPlanEditor = () => {
                     layerRef={layerRef} 
                     isDeleteMode={isDeleteMode} 
                     highlightedId={highlightedId} // NEW Prop
-                    onRemove={removeNodeFromFloor} 
+                    onRemove={(fid: string, nid: string) => { removeNodeFromFloor(fid, nid); setIsDeleteMode(false); }} 
                     onContextMenu={handleContextMenu}
                     onDragStart={(id: string) => { 
                         setIsDraggingNode(true);
