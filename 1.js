@@ -5,16 +5,16 @@ const clientPath = path.join(__dirname, 'apps', 'client', 'src');
 const componentsPath = path.join(clientPath, 'components');
 const editorPath = path.join(componentsPath, 'FloorPlanEditor.tsx');
 
-console.log('🚑 Applying V22: Fixing Sticky Drag & Icon Refresh...');
+console.log('🎨 Surgically Fixing Icons & UI (Anchor Slicing Mode)...');
 
 try {
     let editorCode = fs.readFileSync(editorPath, 'utf8');
 
-    // 我们将完全替换 SingleDeviceNode 和 Nodes 组件。
-    // 这次我们移除复杂的自定义 Memo 比较器，改用标准的 React.memo。
-    
-    const newComponents = `
-// --- Sub-Component: Single Device Node (V22 Stable) ---
+    // --- 1. 定义新的 SingleDeviceNode 代码 ---
+    // 修复点：
+    // - showBorder 默认为 false (Child 不再有边框)
+    // - 仅在特殊状态 (Delete/Highlight/Missing) 下显示边框
+    const newSingleDeviceNodeCode = `// --- Sub-Component: Single Device Node (Surgically Fixed) ---
 const SingleDeviceNode = React.memo(({ 
     node, 
     activeFloorId,
@@ -41,23 +41,21 @@ const SingleDeviceNode = React.memo(({
     const constantTextScale = (1 / currentScale);
     const labelText = node.description ? node.description : node.id.slice(-4);
 
-    // --- Visual Logic ---
+    // --- Visual Logic (Separated Fill & Border) ---
     let iconName = null;
     let strokeColor = '#000000'; 
-    let fillColor = '#22c55e';
-    let borderThickness = 1;
-    let showBorder = true; 
+    let fillColor = '#22c55e';   // Default: Green fill
+    let borderThickness = 1;     
+    let showBorder = false;      // FIXED: Default NO BORDER for everyone (including Child)
 
     const r = role.toLowerCase();
     
     if (r.includes('leader')) {
         iconName = 'Leader.svg'; 
         strokeColor = '#ef4444'; 
-        showBorder = false; 
     } else if (r.includes('router')) {
-        iconName = 'Router.svg';
+        iconName = 'Router.svg'; 
         strokeColor = '#3b82f6'; 
-        showBorder = false; 
     } else {
         // Child Logic
         if (node.category) {
@@ -65,7 +63,7 @@ const SingleDeviceNode = React.memo(({
         }
     }
 
-    // Force border if special state
+    // Force border ONLY if special state
     if (isDeleteMode || isHighlighted || isMissing) {
         showBorder = true;
     }
@@ -73,19 +71,14 @@ const SingleDeviceNode = React.memo(({
     // Load SVG
     const [image] = useImage(iconName ? \`/assets/icons/\${iconName}\` : '', 'anonymous');
 
-    // Dynamic Stroke Logic
     const finalStroke = isDeleteMode ? 'red' : (isHighlighted ? '#06b6d4' : (isMissing ? '#4b5563' : strokeColor));
     const finalStrokeWidth = showBorder ? ((isDeleteMode ? 3 : (isHighlighted ? 5 : borderThickness)) / currentScale) : 0;
 
-    // Imperative Line Update
     const handleDragMove = (e: any) => {
       e.cancelBubble = true;
       if (isMissing) return;
-
       const newX = e.target.x();
       const newY = e.target.y();
-      
-      // Update Lines Imperatively
       const layer = layerRef.current;
       if (layer) {
           const groups = layer.find('Group'); 
@@ -95,22 +88,18 @@ const SingleDeviceNode = React.memo(({
                   const outline = group.findOne('.outline-line');
                   const colorLine = group.findOne('.color-line');
                   if (!colorLine) continue;
-
                   const oldPoints = colorLine.points();
                   const newPoints = [...oldPoints];
                   const isStart = id.startsWith(\`edge-\${node.id}-\`);
                   const isEnd = id.endsWith(\`-\${node.id}\`);
-
                   if (isStart) { newPoints[0] = newX; newPoints[1] = newY; } 
                   else if (isEnd) { newPoints[2] = newX; newPoints[3] = newY; } 
                   else continue;
-
                   if(outline) outline.points(newPoints);
                   if(colorLine) colorLine.points(newPoints);
               }
           }
       }
-      // Call parent handler if needed (optional)
       if (onDragMove) onDragMove(node.id, newX, newY);
     };
 
@@ -129,10 +118,7 @@ const SingleDeviceNode = React.memo(({
                 e.cancelBubble = true; 
                 onContextMenu(e.evt, node.id, node.description, node.category); 
             }}
-            onDragStart={(e) => { 
-                e.cancelBubble = true; 
-                if(!isMissing) onDragStart(node.id); 
-            }}
+            onDragStart={(e) => { e.cancelBubble = true; if(!isMissing) onDragStart(node.id); }}
             onDragMove={handleDragMove}
             onDragEnd={(e) => { 
                 e.cancelBubble = true; 
@@ -194,81 +180,28 @@ const SingleDeviceNode = React.memo(({
             {isMissing && <Text y={-baseRadius - (15/currentScale)} text="?" fontSize={14/currentScale} fill="red" fontStyle="bold" align="center" offsetX={4} perfectDrawEnabled={false} listening={false} />}
         </Group>
     );
-}); // REMOVED CUSTOM COMPARATOR: Let React handle diffs to ensure Icon/Props updates propagate
+});`;
 
-// --- Wrapper Nodes Component ---
-const Nodes = React.memo(({ 
-    activeFloor, 
-    updatePosition, 
-    nodeScale, 
-    currentScale, 
-    baseFontSize, 
-    unassignedDevices,
-    layerRef,
-    isDeleteMode,
-    highlightedId,
-    onRemove,
-    onContextMenu,
-    onDragStart, 
-    onDragEnd 
-}: any) => {
-  
-  const getRole = (id: string) => {
-    const dev = unassignedDevices.find((d: any) => d.mac === id || d.id === id);
-    return (dev?.type || dev?.role || '').toLowerCase();
-  };
-  const getStatus = (id: string) => {
-      const dev = unassignedDevices.find((d: any) => d.mac === id || d.id === id);
-      return dev?.status || 'active';
-  };
+    // --- 2. 执行替换 (SingleDeviceNode) ---
+    const startIdx = editorCode.indexOf('const SingleDeviceNode = React.memo(({');
+    const endIdx = editorCode.indexOf('const Nodes = React.memo(({');
 
-  return (
-    <Group>
-      {activeFloor.nodes.map((node: any) => (
-         <SingleDeviceNode 
-            key={node.id}
-            node={node}
-            activeFloorId={activeFloor.id}
-            role={getRole(node.id)}
-            status={getStatus(node.id)}
-            nodeScale={nodeScale}
-            currentScale={currentScale}
-            baseFontSize={baseFontSize}
-            isDeleteMode={isDeleteMode}
-            highlightedId={highlightedId}
-            layerRef={layerRef}
-            onRemove={onRemove}
-            onContextMenu={onContextMenu}
-            onDragStart={onDragStart}
-            onDragEnd={onDragEnd} 
-            updatePosition={updatePosition}
-         />
-      ))}
-    </Group>
-  );
-});
-`;
-
-    // Strategy: Look for "const SingleDeviceNode = " and replace everything until "export const FloorPlanEditor"
-    // Because we need to replace SingleDeviceNode AND Nodes.
-    
-    const startMarker = 'const SingleDeviceNode = React.memo(({';
-    const endMarker = 'export const FloorPlanEditor = () => {';
-    
-    const startIdx = editorCode.indexOf(startMarker);
-    const endIdx = editorCode.indexOf(endMarker);
-    
     if (startIdx !== -1 && endIdx !== -1) {
         const before = editorCode.substring(0, startIdx);
         const after = editorCode.substring(endIdx);
-        
-        editorCode = before + newComponents + '\n\n' + after;
-        
-        fs.writeFileSync(editorPath, editorCode);
-        console.log('✅ FloorPlanEditor.tsx: Successfully fixed Sticky Drag & Icon Refresh.');
+        editorCode = before + newSingleDeviceNodeCode + '\n\n' + after;
+        console.log('✅ Replaced SingleDeviceNode (Borders Removed).');
     } else {
-        console.error('❌ Could not locate component block to replace. Please check file structure.');
+        console.error('❌ Could not find "SingleDeviceNode" or "Nodes" anchor. Manual check needed.');
     }
+
+    // --- 3. 确保按钮文本是 Confirm ---
+    if (editorCode.includes('>Close</button>')) {
+        editorCode = editorCode.replace('>Close</button>', '>Confirm</button>');
+    }
+
+    fs.writeFileSync(editorPath, editorCode);
+    console.log('🏁 Surgical patch complete.');
 
 } catch (e) {
     console.error('❌ Error patching FloorPlanEditor:', e);
