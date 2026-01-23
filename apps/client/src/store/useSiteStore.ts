@@ -8,7 +8,8 @@ export interface NodePosition {
   id: string; 
   x: number; 
   y: number; 
-  description?: string; 
+  description?: string;
+  category?: string; // Device Category 
 }
 
 export interface Floor {
@@ -35,6 +36,7 @@ interface SiteStore {
   
   updateNodePosition: (floorId: string, nodeId: string, x: number, y: number) => void;
   updateNodeDescription: (floorId: string, nodeId: string, description: string) => void;
+  updateNodeCategory: (floorId: string, nodeId: string, category: string) => void;
   removeNodeFromFloor: (floorId: string, nodeId: string) => void;
   removeNodesByDeviceIds: (nodeIds: string[]) => void;
   
@@ -127,6 +129,17 @@ export const useSiteStore = create<SiteStore>()(
             if (idx === -1) return f;
             const newN = [...f.nodes];
             newN[idx] = { ...newN[idx], description };
+            return { ...f, nodes: newN };
+        })}))
+      })),
+
+      updateNodeCategory: (fid, nid, category) => set(s => ({
+        buildings: s.buildings.map(b => ({ ...b, floors: b.floors.map(f => {
+            if(f.id !== fid) return f;
+            const idx = f.nodes.findIndex(n => n.id === nid);
+            if (idx === -1) return f;
+            const newN = [...f.nodes];
+            newN[idx] = { ...newN[idx], category };
             return { ...f, nodes: newN };
         })}))
       })),

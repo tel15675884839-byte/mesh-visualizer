@@ -3,217 +3,273 @@ const path = require('path');
 
 const clientPath = path.join(__dirname, 'apps', 'client', 'src');
 const componentsPath = path.join(clientPath, 'components');
+const editorPath = path.join(componentsPath, 'FloorPlanEditor.tsx');
 
-console.log('👁️ Enabling "Focus" for All Devices (Safe Update)...');
-
-const sidebarPath = path.join(componentsPath, 'DeviceSidebar.tsx');
+console.log('🚑 Applying V22: Fixing Sticky Drag & Icon Refresh...');
 
 try {
-    let content = fs.readFileSync(sidebarPath, 'utf8');
+    let editorCode = fs.readFileSync(editorPath, 'utf8');
 
-    // 1. UPDATE TreeNode: Allow Eye Icon for any Deployed Node (Active or Missing)
-    // We replace the TreeNode component to ensure the button logic covers missing nodes.
-    const treeNodeRegex = /const TreeNode = \(\{[\s\S]*?^};/m;
+    // 我们将完全替换 SingleDeviceNode 和 Nodes 组件。
+    // 这次我们移除复杂的自定义 Memo 比较器，改用标准的 React.memo。
     
-    // This revised component keeps ALL your existing logic (Checkbox, Drag Block, etc.)
-    const newTreeNode = `const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, descriptionMap, forceDisabled }: any) => {
-  const { isNodeDeployed, findNodeLocation, setActiveView } = useSiteStore();
-  const [isExpanded, setIsExpanded] = useState(node.forceExpand ?? (node.role === 'LEADER'));
-  const isDeployed = isNodeDeployed(node.mac);
-  const isSelected = selectedIds.has(node.mac);
-  
-  const isMissing = node.status === 'missing' || forceDisabled;
-  const isNew = node.isNew && !isDeployed;
+    const newComponents = `
+// --- Sub-Component: Single Device Node (V22 Stable) ---
+const SingleDeviceNode = React.memo(({ 
+    node, 
+    activeFloorId,
+    role, 
+    status, 
+    nodeScale, 
+    currentScale, 
+    baseFontSize, 
+    isDeleteMode,
+    highlightedId,
+    layerRef, 
+    // Actions
+    onRemove,
+    onContextMenu,
+    onDragStart,
+    onDragMove,
+    onDragEnd,
+    updatePosition
+}: any) => {
+    
+    const isMissing = status === 'missing';
+    const isHighlighted = node.id === highlightedId;
+    const baseRadius = 10 * nodeScale;
+    const constantTextScale = (1 / currentScale);
+    const labelText = node.description ? node.description : node.id.slice(-4);
 
-  React.useEffect(() => {
-    if (node.forceExpand) setIsExpanded(true);
-  }, [node.forceExpand]);
+    // --- Visual Logic ---
+    let iconName = null;
+    let strokeColor = '#000000'; 
+    let fillColor = '#22c55e';
+    let borderThickness = 1;
+    let showBorder = true; 
 
-  const hasChildren = node.children && node.children.length > 0;
+    const r = role.toLowerCase();
+    
+    if (r.includes('leader')) {
+        iconName = 'Leader.svg'; 
+        strokeColor = '#ef4444'; 
+        showBorder = false; 
+    } else if (r.includes('router')) {
+        iconName = 'Router.svg';
+        strokeColor = '#3b82f6'; 
+        showBorder = false; 
+    } else {
+        // Child Logic
+        if (node.category) {
+            iconName = \`\${node.category}.svg\`; 
+        }
+    }
 
-  const renderIcon = () => {
-      if (node.role === 'LEADER') return <Circle size={10} className="fill-red-500 text-red-600" />;
-      if (node.role === 'ROUTER') return <Circle size={10} className="fill-blue-500 text-blue-600" />;
-      return <Circle size={10} className="fill-green-500 text-green-600" />;
-  };
+    // Force border if special state
+    if (isDeleteMode || isHighlighted || isMissing) {
+        showBorder = true;
+    }
 
-  const handleDragStart = (e: React.DragEvent) => {
-    if (isDeployed || isMissing) { e.preventDefault(); return; }
-    const effectivePayload = isSelected ? Array.from(selectedIds) : [node.mac];
-    e.dataTransfer.setData('application/json', JSON.stringify({ ids: effectivePayload }));
-  };
+    // Load SVG
+    const [image] = useImage(iconName ? \`/assets/icons/\${iconName}\` : '', 'anonymous');
 
-  const handleFocus = (e: React.MouseEvent) => {
-      e.stopPropagation();
-      const loc = findNodeLocation(node.mac);
-      if (loc) {
-          setActiveView(loc.buildingId, loc.floorId);
-          window.dispatchEvent(new CustomEvent('FOCUS_NODE', { detail: { x: loc.x, y: loc.y, id: node.mac } }));
-      } else {
-          // If node is "missing" but we can't find it on map, it means it was deleted from map manually.
-          // In that case, we can't focus.
-          alert("Device location not found on map.");
+    // Dynamic Stroke Logic
+    const finalStroke = isDeleteMode ? 'red' : (isHighlighted ? '#06b6d4' : (isMissing ? '#4b5563' : strokeColor));
+    const finalStrokeWidth = showBorder ? ((isDeleteMode ? 3 : (isHighlighted ? 5 : borderThickness)) / currentScale) : 0;
+
+    // Imperative Line Update
+    const handleDragMove = (e: any) => {
+      e.cancelBubble = true;
+      if (isMissing) return;
+
+      const newX = e.target.x();
+      const newY = e.target.y();
+      
+      // Update Lines Imperatively
+      const layer = layerRef.current;
+      if (layer) {
+          const groups = layer.find('Group'); 
+          for (const group of groups) {
+              const id = group.id();
+              if (id && id.startsWith('edge-') && id.includes(node.id)) {
+                  const outline = group.findOne('.outline-line');
+                  const colorLine = group.findOne('.color-line');
+                  if (!colorLine) continue;
+
+                  const oldPoints = colorLine.points();
+                  const newPoints = [...oldPoints];
+                  const isStart = id.startsWith(\`edge-\${node.id}-\`);
+                  const isEnd = id.endsWith(\`-\${node.id}\`);
+
+                  if (isStart) { newPoints[0] = newX; newPoints[1] = newY; } 
+                  else if (isEnd) { newPoints[2] = newX; newPoints[3] = newY; } 
+                  else continue;
+
+                  if(outline) outline.points(newPoints);
+                  if(colorLine) colorLine.points(newPoints);
+              }
+          }
       }
-  };
+      // Call parent handler if needed (optional)
+      if (onDragMove) onDragMove(node.id, newX, newY);
+    };
 
-  const customName = descriptionMap ? descriptionMap[node.mac] : null;
-  const displayName = customName || (node.mac ? node.mac.slice(-4) : node.id);
+    return (
+        <Group
+            id={\`node-\${node.id}\`}
+            x={node.x}
+            y={node.y}
+            draggable={!isDeleteMode && !isMissing}
+            opacity={isMissing ? 0.6 : 1}
+            onClick={(e) => { 
+                if (isDeleteMode) { e.cancelBubble = true; onRemove(activeFloorId, node.id); } 
+            }}
+            onContextMenu={(e) => { 
+                e.evt.preventDefault(); 
+                e.cancelBubble = true; 
+                onContextMenu(e.evt, node.id, node.description, node.category); 
+            }}
+            onDragStart={(e) => { 
+                e.cancelBubble = true; 
+                if(!isMissing) onDragStart(node.id); 
+            }}
+            onDragMove={handleDragMove}
+            onDragEnd={(e) => { 
+                e.cancelBubble = true; 
+                if(!isMissing) {
+                    onDragEnd(); 
+                    updatePosition(activeFloorId, node.id, e.target.x(), e.target.y());
+                }
+            }}
+            onMouseEnter={(e) => { 
+                if (isDeleteMode) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'crosshair'; }
+                else if (isMissing) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'not-allowed'; }
+            }}
+            onMouseLeave={(e) => { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'default'; }}
+        >
+            {iconName && image ? (
+                <KonvaImage
+                    image={image}
+                    width={baseRadius * 2}
+                    height={baseRadius * 2}
+                    offset={{ x: baseRadius, y: baseRadius }} 
+                    stroke={finalStroke}
+                    strokeWidth={finalStrokeWidth}
+                    strokeEnabled={showBorder} 
+                    shadowColor={isHighlighted ? '#06b6d4' : 'black'}
+                    shadowBlur={(isHighlighted ? 20 : (isMissing ? 0 : 2)) / currentScale}
+                    shadowOpacity={isHighlighted ? 0.8 : 0.3}
+                    perfectDrawEnabled={false}
+                    listening={true} 
+                />
+            ) : (
+                <Circle 
+                    radius={baseRadius} 
+                    fill={isMissing ? '#9ca3af' : fillColor} 
+                    stroke={finalStroke}
+                    strokeWidth={finalStrokeWidth}
+                    strokeEnabled={showBorder}
+                    shadowColor={isHighlighted ? '#06b6d4' : 'black'}
+                    shadowBlur={(isHighlighted ? 20 : (isMissing ? 0 : 2)) / currentScale} 
+                    shadowOpacity={isHighlighted ? 0.8 : 0.3}
+                    perfectDrawEnabled={false}
+                    dash={isMissing ? [5, 5] : undefined}
+                />
+            )}
+            
+            <Text 
+                y={baseRadius + (5 / currentScale)} 
+                text={labelText} 
+                fontSize={baseFontSize}
+                scaleX={constantTextScale}
+                scaleY={constantTextScale}
+                fill={isMissing ? '#9ca3af' : '#111'}
+                fontStyle={isMissing ? 'italic' : 'bold'}
+                align="center"
+                width={200}
+                offsetX={100}
+                perfectDrawEnabled={false}
+                listening={false} 
+            />
+            {isMissing && <Text y={-baseRadius - (15/currentScale)} text="?" fontSize={14/currentScale} fill="red" fontStyle="bold" align="center" offsetX={4} perfectDrawEnabled={false} listening={false} />}
+        </Group>
+    );
+}); // REMOVED CUSTOM COMPARATOR: Let React handle diffs to ensure Icon/Props updates propagate
+
+// --- Wrapper Nodes Component ---
+const Nodes = React.memo(({ 
+    activeFloor, 
+    updatePosition, 
+    nodeScale, 
+    currentScale, 
+    baseFontSize, 
+    unassignedDevices,
+    layerRef,
+    isDeleteMode,
+    highlightedId,
+    onRemove,
+    onContextMenu,
+    onDragStart, 
+    onDragEnd 
+}: any) => {
+  
+  const getRole = (id: string) => {
+    const dev = unassignedDevices.find((d: any) => d.mac === id || d.id === id);
+    return (dev?.type || dev?.role || '').toLowerCase();
+  };
+  const getStatus = (id: string) => {
+      const dev = unassignedDevices.find((d: any) => d.mac === id || d.id === id);
+      return dev?.status || 'active';
+  };
 
   return (
-    <div className="flex flex-col select-none">
-      <div 
-        className={\`flex items-center py-1.5 pr-2 pl-0 rounded-r-md transition-colors group relative
-            \${isSelected ? 'bg-indigo-50' : 'hover:bg-gray-100'} 
-            \${(isDeployed || isMissing) ? 'opacity-100' : ''} 
-            \${(!isDeployed && !isMissing) ? 'cursor-grab active:cursor-grabbing' : ''}
-            \${isNew ? 'bg-yellow-50 border-l-2 border-yellow-400' : ''}
-            \${isMissing ? 'bg-gray-50/50' : ''} 
-        \`}
-        onClick={(e) => { 
-            e.stopPropagation();
-            if (!isMissing && !isDeployed) {
-                if (e.ctrlKey || e.metaKey) toggleSelect(node);
-                else {
-                    if (selectedIds.size > 0) clearSelection();
-                    setIsExpanded(!isExpanded);
-                }
-            } else {
-                setIsExpanded(!isExpanded);
-            }
-        }}
-        draggable={!isDeployed && !isMissing}
-        onDragStart={handleDragStart}
-      >
-        <div className="w-6 flex justify-center shrink-0 text-gray-400 hover:text-gray-600" onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}>
-          {hasChildren ? (
-            isExpanded ? 
-                <ChevronDown size={14} className={node.role === 'LEADER' ? 'text-red-500' : ''} /> : 
-                <div className="flex items-center"><Play size={10} className="fill-gray-400 text-gray-400" /></div>
-          ) : <span className="w-3" />}
-        </div>
-
-        <div className="mr-2 shrink-0 flex items-center justify-center">
-            {renderIcon()}
-        </div>
-
-        <div className="flex flex-col truncate flex-1">
-            <span className="text-xs font-mono font-medium text-gray-700 truncate group-hover:text-gray-900">
-            {node.role === 'CHILD' ? 'Child' : (node.role === 'LEADER' ? 'Leader' : 'Router')} 
-            <span className={\`ml-1 \${customName ? 'text-indigo-600 font-bold' : (isMissing ? 'text-gray-400 italic line-through' : 'text-gray-400')}\`}>
-                ({displayName})
-            </span>
-            {isNew && <span className="ml-2 text-[8px] bg-yellow-400 text-white px-1 rounded font-bold shadow-sm">NEW</span>}
-            </span>
-        </div>
-
-        {(node.role === 'ROUTER' || node.role === 'LEADER') && node.children.length > 0 && (
-            <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 rounded mr-1">
-                {node.children.length}
-            </span>
-        )}
-
-        <div className="flex items-center gap-1 z-10"> 
-            {/* Logic Update: Show Eye if Deployed OR Missing (since Missing nodes are still on map as ghosts) */}
-            {(isDeployed || isMissing) ? (
-                <button 
-                    onClick={handleFocus}
-                    className={\`p-1 rounded-full transition-colors \${isMissing ? 'text-red-400 hover:text-red-600 hover:bg-red-50' : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'}\`}
-                    title="Locate on Map"
-                >
-                    <Eye size={14} />
-                </button>
-            ) : (
-                <div className="mx-1 text-gray-400 hover:text-indigo-600 cursor-pointer p-1" onClick={(e) => { e.stopPropagation(); toggleSelect(node); }}>
-                    {isSelected ? <CheckSquare size={16} className="text-indigo-600" /> : <Square size={16} />}
-                </div>
-            )}
-        </div>
-
-        {node.uplinkRssi !== undefined && (
-            <div className="ml-1 flex items-center gap-1 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
-                <Signal size={10} className="text-gray-400" />
-                <span className="text-[10px] text-gray-500 font-mono">{node.uplinkRssi}</span>
-            </div>
-        )}
-      </div>
-
-      {isExpanded && hasChildren && (
-        <div className="flex flex-col ml-3 pl-3 border-l border-gray-200/60">
-          {node.children.map((child: any) => (
-             <TreeNode 
-                key={child.id} 
-                node={child} 
-                selectedIds={selectedIds}
-                toggleSelect={toggleSelect}
-                clearSelection={clearSelection}
-                descriptionMap={descriptionMap}
-                forceDisabled={forceDisabled}
-             />
-          ))}
-        </div>
-      )}
-    </div>
+    <Group>
+      {activeFloor.nodes.map((node: any) => (
+         <SingleDeviceNode 
+            key={node.id}
+            node={node}
+            activeFloorId={activeFloor.id}
+            role={getRole(node.id)}
+            status={getStatus(node.id)}
+            nodeScale={nodeScale}
+            currentScale={currentScale}
+            baseFontSize={baseFontSize}
+            isDeleteMode={isDeleteMode}
+            highlightedId={highlightedId}
+            layerRef={layerRef}
+            onRemove={onRemove}
+            onContextMenu={onContextMenu}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd} 
+            updatePosition={updatePosition}
+         />
+      ))}
+    </Group>
   );
-};`;
+});
+`;
 
-    if (treeNodeRegex.test(content)) {
-        content = content.replace(treeNodeRegex, newTreeNode);
-        console.log('✅ DeviceSidebar: TreeNode updated successfully (Safe Replacement).');
-    } else {
-        console.error('❌ Failed to locate TreeNode. Code structure might have changed.');
-    }
-
-    // 2. UPDATE LoopItem: Add Eye Button to the "Missing Devices" bottom list
-    // We look for the missing devices mapping block
-    const missingListRegex = /{missingDevices\.map\(\(d: any\) => \{[\s\S]*?return \(\s*<div key=\{d\.mac\}[\s\S]*?<\/div>\s*\);\s*\}\)}/m;
-
-    const newMissingList = `{missingDevices.map((d: any) => {
-                             const customName = descriptionMap ? descriptionMap[d.mac] : null;
-                             const displayName = customName || d.mac.slice(-4);
-                             return (
-                                <div key={d.mac} className="flex items-center justify-between px-1 py-1 text-xs text-gray-400 font-mono cursor-not-allowed border border-transparent hover:border-red-100 rounded group">
-                                    <div className="flex items-center">
-                                        <div className="w-4 flex justify-center"><Circle size={8} className="fill-gray-300 text-gray-400" /></div>
-                                        <span className="line-through">{displayName}</span>
-                                    </div>
-                                    <button 
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            const loc = findNodeLocation(d.mac);
-                                            if (loc) {
-                                                setActiveView(loc.buildingId, loc.floorId);
-                                                window.dispatchEvent(new CustomEvent('FOCUS_NODE', { detail: { x: loc.x, y: loc.y, id: d.mac } }));
-                                            } else {
-                                                alert("Ghost node not found on map.");
-                                            }
-                                        }}
-                                        className="p-1 text-gray-400 hover:text-indigo-600 rounded-full hover:bg-indigo-50 transition-colors opacity-0 group-hover:opacity-100"
-                                        title="Locate Missing Device"
-                                    >
-                                        <Eye size={12} />
-                                    </button>
-                                </div>
-                             );
-                        })}`;
-
-    if (missingListRegex.test(content)) {
-        content = content.replace(missingListRegex, newMissingList);
-        console.log('✅ DeviceSidebar: LoopItem Missing List updated with Eye Icon.');
-    } else {
-        console.warn('⚠️ Could not locate missing devices list block. It might already be updated.');
-    }
-
-    // 3. Ensure Hooks are destructured in LoopItem
-    // We need findNodeLocation and setActiveView in LoopItem
-    const loopItemHookRegex = /const \{ isNodeDeployed, removeNodesByDeviceIds \} = useSiteStore\(\);/;
-    const newLoopItemHook = `const { isNodeDeployed, removeNodesByDeviceIds, findNodeLocation, setActiveView } = useSiteStore();`;
+    // Strategy: Look for "const SingleDeviceNode = " and replace everything until "export const FloorPlanEditor"
+    // Because we need to replace SingleDeviceNode AND Nodes.
     
-    if (loopItemHookRegex.test(content)) {
-        content = content.replace(loopItemHookRegex, newLoopItemHook);
+    const startMarker = 'const SingleDeviceNode = React.memo(({';
+    const endMarker = 'export const FloorPlanEditor = () => {';
+    
+    const startIdx = editorCode.indexOf(startMarker);
+    const endIdx = editorCode.indexOf(endMarker);
+    
+    if (startIdx !== -1 && endIdx !== -1) {
+        const before = editorCode.substring(0, startIdx);
+        const after = editorCode.substring(endIdx);
+        
+        editorCode = before + newComponents + '\n\n' + after;
+        
+        fs.writeFileSync(editorPath, editorCode);
+        console.log('✅ FloorPlanEditor.tsx: Successfully fixed Sticky Drag & Icon Refresh.');
+    } else {
+        console.error('❌ Could not locate component block to replace. Please check file structure.');
     }
-
-    fs.writeFileSync(sidebarPath, content);
 
 } catch (e) {
-    console.error('❌ Error updating DeviceSidebar.tsx:', e);
+    console.error('❌ Error patching FloorPlanEditor:', e);
 }

@@ -142,6 +142,196 @@ const Connections = React.memo(({ activeFloor, currentScale, layerRef }: { activ
 
 
 // --- Component: Nodes ---
+
+// --- Sub-Component: Single Device Node (Extracted for useImage) ---
+
+// --- Sub-Component: Single Device Node (Refined Icons V20) ---
+
+// --- Sub-Component: Single Device Node (Refined Icons V20) ---
+
+// --- Sub-Component: Single Device Node (V22 Stable) ---
+const SingleDeviceNode = React.memo(({ 
+    node, 
+    activeFloorId,
+    role, 
+    status, 
+    nodeScale, 
+    currentScale, 
+    baseFontSize, 
+    isDeleteMode,
+    highlightedId,
+    layerRef, 
+    // Actions
+    onRemove,
+    onContextMenu,
+    onDragStart,
+    onDragMove,
+    onDragEnd,
+    updatePosition
+}: any) => {
+    
+    const isMissing = status === 'missing';
+    const isHighlighted = node.id === highlightedId;
+    const baseRadius = 10 * nodeScale;
+    const constantTextScale = (1 / currentScale);
+    const labelText = node.description ? node.description : node.id.slice(-4);
+
+    // --- Visual Logic ---
+    let iconName = null;
+    let strokeColor = '#000000'; 
+    let fillColor = '#22c55e';
+    let borderThickness = 1;
+    let showBorder = true; 
+
+    const r = role.toLowerCase();
+    
+    if (r.includes('leader')) {
+        iconName = 'Leader.svg'; 
+        strokeColor = '#ef4444'; 
+        showBorder = false; 
+    } else if (r.includes('router')) {
+        iconName = 'Router.svg';
+        strokeColor = '#3b82f6'; 
+        showBorder = false; 
+    } else {
+        // Child Logic
+        if (node.category) {
+            iconName = `${node.category}.svg`; 
+        }
+    }
+
+    // Force border if special state
+    if (isDeleteMode || isHighlighted || isMissing) {
+        showBorder = true;
+    }
+
+    // Load SVG
+    const [image] = useImage(iconName ? `/assets/icons/${iconName}` : '', 'anonymous');
+
+    // Dynamic Stroke Logic
+    const finalStroke = isDeleteMode ? 'red' : (isHighlighted ? '#06b6d4' : (isMissing ? '#4b5563' : strokeColor));
+    const finalStrokeWidth = showBorder ? ((isDeleteMode ? 3 : (isHighlighted ? 5 : borderThickness)) / currentScale) : 0;
+
+    // Imperative Line Update
+    const handleDragMove = (e: any) => {
+      e.cancelBubble = true;
+      if (isMissing) return;
+
+      const newX = e.target.x();
+      const newY = e.target.y();
+      
+      // Update Lines Imperatively
+      const layer = layerRef.current;
+      if (layer) {
+          const groups = layer.find('Group'); 
+          for (const group of groups) {
+              const id = group.id();
+              if (id && id.startsWith('edge-') && id.includes(node.id)) {
+                  const outline = group.findOne('.outline-line');
+                  const colorLine = group.findOne('.color-line');
+                  if (!colorLine) continue;
+
+                  const oldPoints = colorLine.points();
+                  const newPoints = [...oldPoints];
+                  const isStart = id.startsWith(`edge-${node.id}-`);
+                  const isEnd = id.endsWith(`-${node.id}`);
+
+                  if (isStart) { newPoints[0] = newX; newPoints[1] = newY; } 
+                  else if (isEnd) { newPoints[2] = newX; newPoints[3] = newY; } 
+                  else continue;
+
+                  if(outline) outline.points(newPoints);
+                  if(colorLine) colorLine.points(newPoints);
+              }
+          }
+      }
+      // Call parent handler if needed (optional)
+      if (onDragMove) onDragMove(node.id, newX, newY);
+    };
+
+    return (
+        <Group
+            id={`node-${node.id}`}
+            x={node.x}
+            y={node.y}
+            draggable={!isDeleteMode && !isMissing}
+            opacity={isMissing ? 0.6 : 1}
+            onClick={(e) => { 
+                if (isDeleteMode) { e.cancelBubble = true; onRemove(activeFloorId, node.id); } 
+            }}
+            onContextMenu={(e) => { 
+                e.evt.preventDefault(); 
+                e.cancelBubble = true; 
+                onContextMenu(e.evt, node.id, node.description, node.category); 
+            }}
+            onDragStart={(e) => { 
+                e.cancelBubble = true; 
+                if(!isMissing) onDragStart(node.id); 
+            }}
+            onDragMove={handleDragMove}
+            onDragEnd={(e) => { 
+                e.cancelBubble = true; 
+                if(!isMissing) {
+                    onDragEnd(); 
+                    updatePosition(activeFloorId, node.id, e.target.x(), e.target.y());
+                }
+            }}
+            onMouseEnter={(e) => { 
+                if (isDeleteMode) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'crosshair'; }
+                else if (isMissing) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'not-allowed'; }
+            }}
+            onMouseLeave={(e) => { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'default'; }}
+        >
+            {iconName && image ? (
+                <KonvaImage
+                    image={image}
+                    width={baseRadius * 2}
+                    height={baseRadius * 2}
+                    offset={{ x: baseRadius, y: baseRadius }} 
+                    stroke={finalStroke}
+                    strokeWidth={finalStrokeWidth}
+                    strokeEnabled={showBorder} 
+                    shadowColor={isHighlighted ? '#06b6d4' : 'black'}
+                    shadowBlur={(isHighlighted ? 20 : (isMissing ? 0 : 2)) / currentScale}
+                    shadowOpacity={isHighlighted ? 0.8 : 0.3}
+                    perfectDrawEnabled={false}
+                    listening={true} 
+                />
+            ) : (
+                <Circle 
+                    radius={baseRadius} 
+                    fill={isMissing ? '#9ca3af' : fillColor} 
+                    stroke={finalStroke}
+                    strokeWidth={finalStrokeWidth}
+                    strokeEnabled={showBorder}
+                    shadowColor={isHighlighted ? '#06b6d4' : 'black'}
+                    shadowBlur={(isHighlighted ? 20 : (isMissing ? 0 : 2)) / currentScale} 
+                    shadowOpacity={isHighlighted ? 0.8 : 0.3}
+                    perfectDrawEnabled={false}
+                    dash={isMissing ? [5, 5] : undefined}
+                />
+            )}
+            
+            <Text 
+                y={baseRadius + (5 / currentScale)} 
+                text={labelText} 
+                fontSize={baseFontSize}
+                scaleX={constantTextScale}
+                scaleY={constantTextScale}
+                fill={isMissing ? '#9ca3af' : '#111'}
+                fontStyle={isMissing ? 'italic' : 'bold'}
+                align="center"
+                width={200}
+                offsetX={100}
+                perfectDrawEnabled={false}
+                listening={false} 
+            />
+            {isMissing && <Text y={-baseRadius - (15/currentScale)} text="?" fontSize={14/currentScale} fill="red" fontStyle="bold" align="center" offsetX={4} perfectDrawEnabled={false} listening={false} />}
+        </Group>
+    );
+}); // REMOVED CUSTOM COMPARATOR: Let React handle diffs to ensure Icon/Props updates propagate
+
+// --- Wrapper Nodes Component ---
 const Nodes = React.memo(({ 
     activeFloor, 
     updatePosition, 
@@ -151,7 +341,7 @@ const Nodes = React.memo(({
     unassignedDevices,
     layerRef,
     isDeleteMode,
-    highlightedId, // NEW Prop for Highlight
+    highlightedId,
     onRemove,
     onContextMenu,
     onDragStart, 
@@ -166,135 +356,36 @@ const Nodes = React.memo(({
       const dev = unassignedDevices.find((d: any) => d.mac === id || d.id === id);
       return dev?.status || 'active';
   };
-  const getColor = (r: string) => r.includes('leader') ? '#ef4444' : r.includes('router') ? '#3b82f6' : '#22c55e';
-
-  // Imperative Line Update
-  const updateConnectedLines = (nodeId: string, x: number, y: number) => {
-      const layer = layerRef.current;
-      if (!layer) return;
-      
-      const groups = layer.find('Group'); 
-      for (const group of groups) {
-          const id = group.id();
-          if (id && id.startsWith('edge-') && id.includes(nodeId)) {
-              const outline = group.findOne('.outline-line');
-              const colorLine = group.findOne('.color-line');
-              const hitLine = group.findOne('.hit-line');
-              if (!colorLine) continue;
-
-              const oldPoints = colorLine.points();
-              const newPoints = [...oldPoints];
-              const isStart = id.startsWith(`edge-${nodeId}-`);
-              const isEnd = id.endsWith(`-${nodeId}`);
-
-              if (isStart) { newPoints[0] = x; newPoints[1] = y; } 
-              else if (isEnd) { newPoints[2] = x; newPoints[3] = y; } 
-              else continue;
-
-              if(outline) outline.points(newPoints);
-              if(colorLine) colorLine.points(newPoints);
-              if(hitLine) hitLine.points(newPoints);
-          }
-      }
-  };
 
   return (
     <Group>
-      {activeFloor.nodes.map((node: any) => {
-        const role = getRole(node.id);
-        const status = getStatus(node.id);
-        const isMissing = status === 'missing';
-        const isHighlighted = node.id === highlightedId; // Highlight Check
-        
-        const baseRadius = 10 * nodeScale;
-        const constantTextScale = (1 / currentScale); 
-        
-        const labelText = node.description ? node.description : node.id.slice(-4);
-
-        return (
-          <Group
+      {activeFloor.nodes.map((node: any) => (
+         <SingleDeviceNode 
             key={node.id}
-            id={`node-${node.id}`}
-            x={node.x}
-            y={node.y}
-            draggable={!isDeleteMode && !isMissing}
-            opacity={isMissing ? 0.6 : 1}
-            onClick={(e) => {
-                if (isDeleteMode) {
-                    e.cancelBubble = true;
-                    onRemove(activeFloor.id, node.id);
-                }
-            }}
-            onContextMenu={(e) => {
-                e.evt.preventDefault();
-                e.cancelBubble = true;
-                onContextMenu(e.evt, node.id, node.description);
-            }}
-            onDragStart={(e) => { 
-                e.cancelBubble = true; 
-                if(!isMissing) onDragStart(node.id); 
-            }}
-            onDragMove={(e) => {
-                e.cancelBubble = true;
-                const newX = e.target.x();
-                const newY = e.target.y();
-                if(!isMissing) updateConnectedLines(node.id, newX, newY);
-            }}
-            onDragEnd={(e) => {
-                e.cancelBubble = true;
-                if(!isMissing) {
-                    onDragEnd();
-                    updatePosition(activeFloor.id, node.id, e.target.x(), e.target.y());
-                }
-            }}
-            onMouseEnter={(e) => { 
-                if (isDeleteMode) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'crosshair'; }
-                else if (isMissing) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'not-allowed'; }
-            }}
-            onMouseLeave={(e) => {
-                const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'default';
-            }}
-          >
-            <Circle 
-                radius={baseRadius} 
-                fill={isMissing ? '#9ca3af' : getColor(role)} 
-                // Enhanced Stroke for Highlight
-                stroke={isDeleteMode ? 'red' : (isHighlighted ? '#06b6d4' : (isMissing ? '#4b5563' : 'white'))} 
-                strokeWidth={(isDeleteMode ? 3 : (isHighlighted ? 5 : 2)) / currentScale} 
-                // Enhanced Shadow for Highlight
-                shadowColor={isHighlighted ? '#06b6d4' : 'black'}
-                shadowBlur={(isHighlighted ? 20 : (isMissing ? 0 : 2)) / currentScale} 
-                shadowOpacity={isHighlighted ? 0.8 : 0.3}
-                perfectDrawEnabled={false}
-                dash={isMissing ? [5, 5] : undefined}
-            />
-            <Text 
-                y={baseRadius + (5 / currentScale)} 
-                text={labelText} 
-                fontSize={baseFontSize}
-                scaleX={constantTextScale}
-                scaleY={constantTextScale}
-                fill={isMissing ? '#9ca3af' : '#111'}
-                fontStyle={isMissing ? 'italic' : 'bold'}
-                align="center"
-                width={200}
-                offsetX={100}
-                listening={false}
-            perfectDrawEnabled={false}
-            />
-            {isMissing && <Text y={-baseRadius - (15/currentScale)} text="?" fontSize={14/currentScale} fill="red" fontStyle="bold" align="center" offsetX={4} listening={false}
-            perfectDrawEnabled={false} />}
-          </Group>
-        );
-      })}
+            node={node}
+            activeFloorId={activeFloor.id}
+            role={getRole(node.id)}
+            status={getStatus(node.id)}
+            nodeScale={nodeScale}
+            currentScale={currentScale}
+            baseFontSize={baseFontSize}
+            isDeleteMode={isDeleteMode}
+            highlightedId={highlightedId}
+            layerRef={layerRef}
+            onRemove={onRemove}
+            onContextMenu={onContextMenu}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd} 
+            updatePosition={updatePosition}
+         />
+      ))}
     </Group>
   );
 });
 
 
-// --- Main Component: FloorPlanEditor ---
 export const FloorPlanEditor = () => {
-  const { buildings, activeBuildingId, activeFloorId, setActiveView, getActiveFloor, updateNodePosition, updateNodeDescription, removeNodeFromFloor, nodeScale, setNodeScale, baseFontSize, setBaseFontSize, viewState, setViewState } = useSiteStore();
+  const { buildings, activeBuildingId, activeFloorId, setActiveView, getActiveFloor, updateNodePosition, updateNodeDescription, removeNodeFromFloor, updateNodeCategory, nodeScale, setNodeScale, baseFontSize, setBaseFontSize, viewState, setViewState } = useSiteStore();
   const { unassignedDevices, clearDeviceSelection } = useTopologyStore();
   const activeFloor = getActiveFloor();
   const stageRef = useRef<Konva.Stage>(null);
@@ -304,6 +395,7 @@ export const FloorPlanEditor = () => {
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [selectionBox, setSelectionBox] = useState<{ startX: number, startY: number, endX: number, endY: number, visible: boolean } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ visible: boolean, x: number, y: number, nodeId: string | null, currentDesc?: string }>({ visible: false, x: 0, y: 0, nodeId: null });
+  const [propertyModal, setPropertyModal] = useState<{ visible: boolean, x: number, y: number, nodeId: string | null, currentDesc?: string, currentCategory?: string }>({ visible: false, x: 0, y: 0, nodeId: null });
   const [isDraggingNode, setIsDraggingNode] = useState(false);
   // NEW: Highlight State
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
@@ -465,8 +557,13 @@ export const FloorPlanEditor = () => {
     setSelectionBox(null); setIsDeleteMode(false); // AUTO-EXIT
   };
 
-  const handleContextMenu = (evt: any, nodeId: string, description?: string) => setContextMenu({ visible: true, x: evt.clientX, y: evt.clientY, nodeId, currentDesc: description });
+  const handleContextMenu = (evt: any, nodeId: string, description?: string, category?: string) => setContextMenu({ visible: true, x: evt.clientX, y: evt.clientY, nodeId, currentDesc: description, currentCategory: category });
   const handleDeleteFromContext = () => { if (contextMenu.nodeId) { removeNodeFromFloor(activeFloor.id, contextMenu.nodeId); setContextMenu({ ...contextMenu, visible: false }); }};
+  
+  const handleOpenProperties = () => {
+      setPropertyModal(contextMenu);
+      setContextMenu({ ...contextMenu, visible: false });
+  };
   const handleSetDescription = () => {
       if (contextMenu.nodeId) {
           const desc = prompt("Enter device description (Alias):", contextMenu.currentDesc || "");
@@ -527,12 +624,63 @@ export const FloorPlanEditor = () => {
             </Stage>
             {contextMenu.visible && (
                 <div style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 100 }} className="bg-white border border-gray-200 shadow-lg rounded-md overflow-hidden min-w-[140px]">
-                    <div className="px-4 py-2 hover:bg-gray-50 text-gray-700 text-sm cursor-pointer flex items-center gap-2" onClick={handleSetDescription}><Pencil size={14} /> Set Alias</div>
+                    <div className="px-4 py-2 hover:bg-gray-50 text-gray-700 text-sm cursor-pointer flex items-center gap-2" onClick={handleOpenProperties}><Pencil size={14} /> Properties</div>
                     <div className="px-4 py-2 hover:bg-red-50 text-red-600 text-sm cursor-pointer flex items-center gap-2" onClick={handleDeleteFromContext}><Trash2 size={14} /> Delete</div>
                     <div className="px-4 py-2 hover:bg-gray-50 text-gray-600 text-sm cursor-pointer border-t border-gray-100 flex items-center gap-2" onClick={() => setContextMenu({ ...contextMenu, visible: false })}><X size={14} /> Cancel</div>
                 </div>
             )}
-          </>
+          
+            {propertyModal.visible && (
+                <div className="fixed inset-0 bg-black/20 z-[200] flex items-center justify-center" onClick={() => setPropertyModal({ ...propertyModal, visible: false })}>
+                    <div className="bg-white rounded-lg shadow-xl p-6 w-80" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-lg font-bold text-gray-800 mb-4">Device Properties</h3>
+                        
+                        <div className="mb-4">
+                            <label className="block text-xs font-bold text-gray-500 mb-1">Alias / Description</label>
+                            <input 
+                                type="text" 
+                                className="w-full p-2 border border-gray-300 rounded text-sm"
+                                defaultValue={propertyModal.currentDesc || ''}
+                                onBlur={(e) => {
+                                    if(propertyModal.nodeId) {
+                                       const val = e.target.value;
+                                       if(val && val !== propertyModal.currentDesc) {
+                                            const isUnique = useSiteStore.getState().checkDescriptionUnique(val, propertyModal.nodeId);
+                                            if(!isUnique) { alert('Alias not unique'); return; }
+                                            updateNodeDescription(activeFloor.id, propertyModal.nodeId, val);
+                                       }
+                                    }
+                                }}
+                            />
+                        </div>
+
+                        <div className="mb-4">
+                            <label className="block text-xs font-bold text-gray-500 mb-1">Device Category</label>
+                            <select 
+                                className="w-full p-2 border border-gray-300 rounded text-sm bg-white"
+                                defaultValue={propertyModal.currentCategory || ''}
+                                onChange={(e) => {
+                                    if(propertyModal.nodeId) {
+                                        updateNodeCategory(activeFloor.id, propertyModal.nodeId, e.target.value);
+                                    }
+                                }}
+                            >
+                                <option value="">Default (Green Circle)</option>
+                                <option value="heat-mult">Heat or Mult Detector</option>
+                                <option value="smoke">Smoke Detector</option>
+                                <option value="io-module">IO Module</option>
+                                <option value="mcp">MCP</option>
+                                <option value="sounder">Sounder</option>
+                            </select>
+                        </div>
+                        
+                        <div className="flex justify-end">
+                            <button className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-sm font-medium" onClick={() => setPropertyModal({ ...propertyModal, visible: false })}>Confirm</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+    </>
         )}
       </div>
     </div>
