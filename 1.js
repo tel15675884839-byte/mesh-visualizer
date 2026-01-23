@@ -3,285 +3,406 @@ const path = require('path');
 
 const clientPath = path.join(__dirname, 'apps', 'client', 'src');
 const componentsPath = path.join(clientPath, 'components');
-const storePath = path.join(clientPath, 'store');
 
-console.log('🔧 Finalizing Update Logic: Ghost Retention & Visuals...');
+console.log('🏷️ Renaming Unlinked to Missing Devices & Disabling Interactions...');
 
-// 1. UPDATE useTopologyStore.ts (Logic Fix)
-// Goal: Stop auto-deleting missing nodes from map. Keep them as 'missing'.
-try {
-    let content = fs.readFileSync(path.join(storePath, 'useTopologyStore.ts'), 'utf8');
+const sidebarContent = `
+import React, { useMemo, useState, useRef } from 'react';
+import { useTopologyStore } from '../store/useTopologyStore';
+import { useSiteStore } from '../store/useSiteStore';
+import { buildTopologyTree, filterTopologyNodes, validateMacConflicts } from '../utils/topologyTree';
+import type { TopologyTreeNode, Device } from '../utils/topologyTree';
+import { parseTopologyFile } from '../utils/fileParser';
+import { ChevronRight, ChevronDown, Wifi, Signal, Search, Trash2, X, Plus, Upload, RefreshCw, Check, Play, Circle, Box as BoxIcon, Square, CheckSquare, AlertTriangle, Eye } from 'lucide-react';
+import axios from 'axios';
 
-    // We need to replace the importLoopData implementation.
-    // Finding the specific block to replace carefully.
-    const targetAction = `importLoopData: (loopId, newDevices, newEdges, onRemoveNodes) => set((state) => {`;
-    
-    // The new logic: DO NOT call onRemoveNodes for dropped items. Just mark them.
-    const newImplementation = `importLoopData: (loopId, newDevices, newEdges, onRemoveNodes) => set((state) => {
-        const oldLoopDevices = state.unassignedDevices.filter(d => d.loopId === loopId);
-        const otherLoopDevices = state.unassignedDevices.filter(d => d.loopId !== loopId);
-        
-        const oldMacs = new Set(oldLoopDevices.map(d => d.mac));
-        const newMacs = new Set(newDevices.map(d => d.mac));
-        
-        // Identify Missing (Old but not in New) -> Keep them, mark as missing
-        // CRITICAL CHANGE: Do NOT call onRemoveNodes here. We want them to stay on map as ghosts.
-        const missingDevices = oldLoopDevices
-            .filter(d => !newMacs.has(d.mac))
-            .map(d => ({ ...d, status: 'missing' }));
-
-        // Identify New/Updated
-        const processedNewDevices = newDevices.map(d => ({
-            ...d,
-            loopId,
-            isNew: !oldMacs.has(d.mac), // Tag as new if not in old set
-            status: 'active'
-        }));
-
-        // Edges: Only keep edges for active devices. Missing devices lose connections naturally
-        // or we can keep old edges if both ends are missing? 
-        // For visual clarity, usually ghost nodes don't have lines.
-        // Let's replace edges with NEW edges only. Ghosts become isolated dots.
-        const otherEdges = state.edges.filter(e => e.loopId !== loopId);
-        const taggedEdges = newEdges.map(e => ({ ...e, loopId }));
-
-        return {
-          unassignedDevices: [...otherLoopDevices, ...processedNewDevices, ...missingDevices],
-          edges: [...otherEdges, ...taggedEdges],
-          importError: null
-        };
-      }),`;
-
-    // Perform replacement using regex to capture the full function body
-    const regex = /importLoopData:\s*\(loopId,\s*newDevices,\s*newEdges,\s*onRemoveNodes\)\s*=>\s*set\(\(state\)\s*=>\s*\{[\s\S]*?\}\),/m;
-    
-    if (regex.test(content)) {
-        content = content.replace(regex, newImplementation);
-        fs.writeFileSync(path.join(storePath, 'useTopologyStore.ts'), content);
-        console.log('✅ useTopologyStore.ts: Disabled auto-delete for missing nodes.');
-    } else {
-        console.warn('⚠️ Could not locate importLoopData to patch.');
-    }
-} catch (e) {
-    console.error('❌ Error patching useTopologyStore.ts', e);
-}
-
-
-// 2. UPDATE DeviceSidebar.tsx (UI Label Fix)
-try {
-    let content = fs.readFileSync(path.join(componentsPath, 'DeviceSidebar.tsx'), 'utf8');
-
-    // 1. Rename Section Header
-    // Look for "Missing / Offline" or similar
-    const oldHeaderRegex = /Missing \/ Offline \(\{[^}]+\}\)/;
-    const newHeader = `Missing device ({missingDevices.length})`;
-    
-    if (oldHeaderRegex.test(content)) {
-        content = content.replace(oldHeaderRegex, newHeader);
-    } else {
-        // Fallback: look for the string literal
-        content = content.replace("Missing / Offline", "Missing device");
-    }
-
-    // 2. Ensure Drag is Disabled in TreeNode
-    // We already did this in V16, but reinforcing the logic inside LoopItem's rendering of missing list
-    // The previous code rendered a flat list for missing items:
-    // <div key={d.mac} ... cursor-not-allowed ...>
-    
-    // Let's make sure the text "(Offline)" is removed or updated if needed, 
-    // but the prompt just said "Missing device" list name.
-    
-    fs.writeFileSync(path.join(componentsPath, 'DeviceSidebar.tsx'), content);
-    console.log('✅ DeviceSidebar.tsx: Renamed Missing section.');
-
-} catch (e) {
-    console.error('❌ Error patching DeviceSidebar.tsx', e);
-}
-
-
-// 3. UPDATE FloorPlanEditor.tsx (Ghost Visuals)
-try {
-    let content = fs.readFileSync(path.join(componentsPath, 'FloorPlanEditor.tsx'), 'utf8');
-
-    // We need to inject the Question Mark logic into the Nodes component.
-    // We look for the <Group> rendering inside Nodes.
-    
-    // Strategy: Replace the Text component rendering logic to show "?" when missing.
-    // The previous code had: {isMissing && <Text ... text="?" ... />}
-    // We want to ensure it's CENTERED and replaces the ID.
-
-    const nodesComponentRegex = /const Nodes = React\.memo\(\(\{[\s\S]*?return \(\s*<Group>[\s\S]*?<\/Group>\s*\);\s*\}\);/m;
-    
-    if (nodesComponentRegex.test(content)) {
-        // We will define a replacement Nodes component string to ensure it's exactly as requested
-        // Note: Using the exact same props and logic as V14/V16 but enforcing the Visual Style.
-        
-        const newNodesComponent = `const Nodes = React.memo(({ 
-    activeFloor, 
-    updatePosition, 
-    nodeScale, 
-    currentScale, 
-    baseFontSize, 
-    unassignedDevices,
-    layerRef,
-    isDeleteMode,
-    onRemove,
-    onContextMenu,
-    onDragStart, 
-    onDragEnd 
-}: any) => {
+// --- Tree Node ---
+// Added forceDisabled prop to treat nodes as missing/readonly
+const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, descriptionMap, forceDisabled }: any) => {
+  const { isNodeDeployed, findNodeLocation, setActiveView } = useSiteStore();
+  const [isExpanded, setIsExpanded] = useState(node.forceExpand ?? (node.role === 'LEADER'));
+  const isDeployed = isNodeDeployed(node.mac);
+  const isSelected = selectedIds.has(node.mac);
   
-  const getRole = (id: string) => {
-    const dev = unassignedDevices.find((d: any) => d.mac === id || d.id === id);
-    return (dev?.type || dev?.role || '').toLowerCase();
-  };
-  const getStatus = (id: string) => {
-      const dev = unassignedDevices.find((d: any) => d.mac === id || d.id === id);
-      return dev?.status || 'active';
-  };
-  const getColor = (r: string) => r.includes('leader') ? '#ef4444' : r.includes('router') ? '#3b82f6' : '#22c55e';
+  // LOGIC UPDATE: forceDisabled makes the node behave exactly like 'missing' (gray, no drag)
+  const isMissing = node.status === 'missing' || forceDisabled;
+  const isNew = node.isNew && !isDeployed;
 
-  // Imperative Line Update Logic
-  const updateConnectedLines = (nodeId: string, x: number, y: number) => {
-      const layer = layerRef.current;
-      if (!layer) return;
-      const groups = layer.find('Group'); 
-      for (const group of groups) {
-          const id = group.id();
-          if (id && id.startsWith('edge-') && id.includes(nodeId)) {
-              const outline = group.findOne('.outline-line');
-              const colorLine = group.findOne('.color-line');
-              const hitLine = group.findOne('.hit-line');
-              if (!colorLine) continue;
-              const oldPoints = colorLine.points();
-              const newPoints = [...oldPoints];
-              const isStart = id.startsWith(\`edge-\${nodeId}-\`);
-              const isEnd = id.endsWith(\`-\${nodeId}\`);
-              if (isStart) { newPoints[0] = x; newPoints[1] = y; } else if (isEnd) { newPoints[2] = x; newPoints[3] = y; } else { continue; }
-              if(outline) outline.points(newPoints);
-              if(colorLine) colorLine.points(newPoints);
-              if(hitLine) hitLine.points(newPoints);
-          }
+  React.useEffect(() => {
+    if (node.forceExpand) setIsExpanded(true);
+  }, [node.forceExpand]);
+
+  const hasChildren = node.children && node.children.length > 0;
+
+  const renderIcon = () => {
+      if (node.role === 'LEADER') return <Circle size={10} className="fill-red-500 text-red-600" />;
+      if (node.role === 'ROUTER') return <Circle size={10} className="fill-blue-500 text-blue-600" />;
+      return <Circle size={10} className="fill-green-500 text-green-600" />;
+  };
+
+  const handleDragStart = (e: React.DragEvent) => {
+    if (isDeployed || isMissing) { 
+        e.preventDefault(); 
+        return; 
+    }
+    const effectivePayload = isSelected ? Array.from(selectedIds) : [node.mac];
+    e.dataTransfer.setData('application/json', JSON.stringify({ ids: effectivePayload }));
+  };
+
+  const handleFocus = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      const loc = findNodeLocation(node.mac);
+      if (loc) {
+          setActiveView(loc.buildingId, loc.floorId);
+          window.dispatchEvent(new CustomEvent('FOCUS_NODE', { detail: { x: loc.x, y: loc.y } }));
+      }
+  };
+
+  const customName = descriptionMap ? descriptionMap[node.mac] : null;
+  const displayName = customName || (node.mac ? node.mac.slice(-4) : node.id);
+
+  return (
+    <div className="flex flex-col select-none">
+      <div 
+        className={\`flex items-center py-1.5 pr-2 pl-0 rounded-r-md transition-colors group 
+            \${isSelected ? 'bg-indigo-50' : 'hover:bg-gray-100'} 
+            \${(isDeployed || isMissing) ? 'opacity-60 cursor-not-allowed' : 'cursor-grab active:cursor-grabbing'}
+            \${isNew ? 'bg-yellow-50 border-l-2 border-yellow-400' : ''}
+            \${isMissing ? 'grayscale' : ''} 
+        \`}
+        onClick={(e) => { 
+            e.stopPropagation();
+            // Block interactions if missing/disabled
+            if (!isMissing) {
+                if (e.ctrlKey || e.metaKey) {
+                    toggleSelect(node);
+                } else {
+                    if (selectedIds.size > 0) clearSelection();
+                    setIsExpanded(!isExpanded);
+                }
+            }
+        }}
+        draggable={!isDeployed && !isMissing}
+        onDragStart={handleDragStart}
+      >
+        <div className="w-6 flex justify-center shrink-0 text-gray-400 hover:text-gray-600" onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}>
+          {hasChildren ? (
+            isExpanded ? 
+                <ChevronDown size={14} className={node.role === 'LEADER' ? 'text-red-500' : ''} /> : 
+                <div className="flex items-center"><Play size={10} className="fill-gray-400 text-gray-400" /></div>
+          ) : <span className="w-3" />}
+        </div>
+
+        <div className="mr-2 shrink-0 flex items-center justify-center">
+            {renderIcon()}
+        </div>
+
+        <div className="flex flex-col truncate flex-1">
+            <span className="text-xs font-mono font-medium text-gray-700 truncate group-hover:text-gray-900">
+            {node.role === 'CHILD' ? 'Child' : (node.role === 'LEADER' ? 'Leader' : 'Router')} 
+            <span className={\`ml-1 \${customName ? 'text-indigo-600 font-bold' : (isMissing ? 'text-gray-400 italic' : 'text-gray-400')}\`}>
+                ({displayName})
+            </span>
+            {isNew && <span className="ml-2 text-[8px] bg-yellow-400 text-white px-1 rounded font-bold shadow-sm">NEW</span>}
+            </span>
+        </div>
+
+        {(node.role === 'ROUTER' || node.role === 'LEADER') && node.children.length > 0 && (
+            <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 rounded mr-1">
+                {node.children.length}
+            </span>
+        )}
+
+        <div className="flex items-center gap-1">
+            {isDeployed ? (
+                <button onClick={handleFocus} className="p-1 text-gray-400 hover:text-indigo-600 rounded-full hover:bg-indigo-50 transition-colors" title="Locate on Map">
+                    <Eye size={14} />
+                </button>
+            ) : (
+                !isMissing && (
+                    <div className="mx-1 text-gray-400 hover:text-indigo-600 cursor-pointer p-1" onClick={(e) => { e.stopPropagation(); toggleSelect(node); }}>
+                        {isSelected ? <CheckSquare size={16} className="text-indigo-600" /> : <Square size={16} />}
+                    </div>
+                )
+            )}
+        </div>
+
+        {node.uplinkRssi !== undefined && (
+            <div className="ml-1 flex items-center gap-1 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
+                <Signal size={10} className="text-gray-400" />
+                <span className="text-[10px] text-gray-500 font-mono">{node.uplinkRssi}</span>
+            </div>
+        )}
+      </div>
+
+      {isExpanded && hasChildren && (
+        <div className="flex flex-col ml-3 pl-3 border-l border-gray-200/60">
+          {node.children.map((child: any) => (
+             <TreeNode 
+                key={child.id} 
+                node={child} 
+                selectedIds={selectedIds}
+                toggleSelect={toggleSelect}
+                clearSelection={clearSelection}
+                descriptionMap={descriptionMap}
+                forceDisabled={forceDisabled} // Propagate disability
+             />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const LoopItem = ({ loopId, devices, edges, searchQuery, allDevices, onImport, selectedIds, onToggleSelect, onDeleteLoop, onClearSelect, descriptionMap }: any) => {
+  const { setImportError, clearMissingNodes } = useTopologyStore();
+  const { isNodeDeployed, removeNodesByDeviceIds } = useSiteStore();
+  const [isExpanded, setIsExpanded] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const activeDevices = useMemo(() => devices.filter((d: any) => d.status !== 'missing'), [devices]);
+  const missingDevices = useMemo(() => devices.filter((d: any) => d.status === 'missing'), [devices]);
+
+  const deployedCount = activeDevices.filter((d: any) => isNodeDeployed(d.mac)).length;
+  const remainingCount = activeDevices.length - deployedCount;
+
+  const { roots, orphans } = useMemo(() => {
+    const rawTree = buildTopologyTree(activeDevices, edges);
+    const sortedRoots = rawTree.roots.sort((a, b) => {
+        if (a.role === 'LEADER') return -1;
+        if (b.role === 'LEADER') return 1;
+        return a.mac.localeCompare(b.mac);
+    });
+    return {
+      roots: filterTopologyNodes(sortedRoots, searchQuery, descriptionMap),
+      orphans: filterTopologyNodes(rawTree.orphans, searchQuery, descriptionMap)
+    };
+  }, [activeDevices, edges, searchQuery, descriptionMap]);
+
+  const handleMultiDragStart = (e: React.DragEvent) => {
+      const ids = Array.from(selectedIds) as string[];
+      if (ids.length > 0) {
+        e.dataTransfer.setData('application/json', JSON.stringify({ ids }));
+      }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+            const content = event.target?.result as string;
+            const { devices: parsedDevices, edges: parsedEdges } = parseTopologyFile(content, file.name);
+            if (parsedDevices.length === 0) throw new Error("No devices found.");
+            const formattedDevices = parsedDevices.map(d => ({
+                ...d,
+                type: (d.role || d.type || 'CHILD').toUpperCase().includes('LEADER') ? 'LEADER' : 
+                    (d.role || d.type || '').toUpperCase().includes('ROUTER') ? 'ROUTER' : 'CHILD',
+                status: 'UNASSIGNED',
+                loopId: loopId
+            }));
+            const conflictError = validateMacConflicts(allDevices, formattedDevices, loopId);
+            if (conflictError) { alert(conflictError); return; }
+            await axios.post('http://localhost:3000/api/topology/sync', { devices: formattedDevices, edges: parsedEdges }).catch(e=>{});
+            onImport(loopId, formattedDevices, parsedEdges);
+        } catch (err: any) {
+            setImportError(err.message);
+            alert(\`Import Failed: \${err.message}\`);
+        } finally { if (fileInputRef.current) fileInputRef.current.value = ''; }
+      };
+      reader.readAsText(file);
+  };
+
+  const handleClearMissing = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if(confirm(\`Delete \${missingDevices.length} missing devices?\`)) {
+          clearMissingNodes(loopId, (ids) => removeNodesByDeviceIds(ids));
       }
   };
 
   return (
-    <Group>
-      {activeFloor.nodes.map((node: any) => {
-        const role = getRole(node.id);
-        const status = getStatus(node.id);
-        const isMissing = status === 'missing';
-        
-        const baseRadius = 10 * nodeScale;
-        const constantTextScale = (1 / currentScale); 
-        const labelText = node.description ? node.description : node.id.slice(-4);
+    <div className="mb-4 border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm" draggable={selectedIds.size > 0}>
+      <div className="flex items-center justify-between px-3 py-2 bg-gray-50 cursor-pointer hover:bg-gray-100" onClick={() => setIsExpanded(!isExpanded)}>
+        <div className="flex items-center gap-2">
+           {isExpanded ? <ChevronDown size={14} className="text-gray-500" /> : <ChevronRight size={14} className="text-gray-500" />}
+           <span className="font-semibold text-xs text-gray-700">LOOP {loopId}</span>
+           <span className="text-[10px] text-gray-400 bg-white px-1.5 rounded border border-gray-200" title="Active Devices">
+             {activeDevices.length}
+           </span>
+           {remainingCount > 0 && (
+               <span className="text-[10px] text-white bg-indigo-500 px-1.5 rounded border border-indigo-600 font-medium">
+                 {remainingCount} Left
+               </span>
+           )}
+        </div>
+        <div className="flex items-center gap-1">
+           <button onClick={(e)=>{e.stopPropagation();fileInputRef.current?.click()}} className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"><Upload size={14}/></button>
+           <button onClick={(e)=>{e.stopPropagation(); if(confirm('Delete Loop? Devices on map will be removed.')) onDeleteLoop(loopId); }} className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"><Trash2 size={14}/></button>
+           <input ref={fileInputRef} type="file" className="hidden" accept=".json,.html" onChange={handleFileChange} />
+        </div>
+      </div>
+      
+      {isExpanded && (
+        <div className="p-2 min-h-[40px]" onDragStart={handleMultiDragStart}>
+          <div className="space-y-1">
+             {roots.map((root: any) => (
+                 <TreeNode key={root.id} node={root} selectedIds={selectedIds} toggleSelect={onToggleSelect} clearSelection={onClearSelect} descriptionMap={descriptionMap} />
+             ))}
+             
+             {/* RENAMED SECTION: Missing Devices (formerly Unlinked) */}
+             {orphans.length > 0 && (
+                <div className="mt-2 text-[10px] text-gray-400 font-bold px-1 uppercase tracking-wider border-t border-gray-100 pt-2">
+                    Missing Devices
+                </div>
+             )}
+             {orphans.map((orphan: any) => (
+                 <TreeNode 
+                    key={orphan.id} 
+                    node={orphan} 
+                    selectedIds={selectedIds} 
+                    toggleSelect={onToggleSelect} 
+                    clearSelection={onClearSelect} 
+                    descriptionMap={descriptionMap}
+                    forceDisabled={true} // FORCE DISABLE
+                 />
+             ))}
 
-        return (
-          <Group
-            key={node.id}
-            id={\`node-\${node.id}\`}
-            x={node.x}
-            y={node.y}
-            draggable={!isDeleteMode && !isMissing} // LOCKED if missing
-            opacity={isMissing ? 0.8 : 1} // Slightly clearer ghost
-            onClick={(e) => {
-                if (isDeleteMode) {
-                    e.cancelBubble = true;
-                    onRemove(activeFloor.id, node.id);
-                }
-            }}
-            onContextMenu={(e) => {
-                e.evt.preventDefault();
-                // Disable context menu for missing? Or allow delete only?
-                // Letting it passthrough allows delete, which is good.
-                e.cancelBubble = true;
-                onContextMenu(e.evt, node.id, node.description);
-            }}
-            onDragStart={(e) => { 
-                e.cancelBubble = true; 
-                if(!isMissing) onDragStart(node.id); 
-            }}
-            onDragMove={(e) => {
-                e.cancelBubble = true;
-                if(!isMissing) {
-                    const newX = e.target.x();
-                    const newY = e.target.y();
-                    updateConnectedLines(node.id, newX, newY);
-                }
-            }}
-            onDragEnd={(e) => {
-                e.cancelBubble = true;
-                if(!isMissing) {
-                    onDragEnd();
-                    updatePosition(activeFloor.id, node.id, e.target.x(), e.target.y());
-                }
-            }}
-            onMouseEnter={(e) => { 
-                if (isDeleteMode) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'crosshair'; }
-                else if (isMissing) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'not-allowed'; }
-            }}
-            onMouseLeave={(e) => {
-               const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'default'; 
-            }}
-          >
-            {/* Visuals: Circle */}
-            <Circle 
-                radius={baseRadius} 
-                fill={isMissing ? '#e5e7eb' : getColor(role)} // Light gray fill for ghost
-                stroke={isDeleteMode ? 'red' : (isMissing ? '#6b7280' : 'white')} // Dark gray stroke for ghost
-                strokeWidth={(isDeleteMode ? 3 : 2) / currentScale} 
-                shadowBlur={isMissing ? 0 : 2} 
-                perfectDrawEnabled={false}
-                dash={isMissing ? [5, 5] : undefined} // Dashed Border
-            />
-            
-            {/* Visuals: Text Label (Name) */}
-            <Text 
-                y={baseRadius + (5 / currentScale)} 
-                text={labelText} 
-                fontSize={baseFontSize}
-                scaleX={constantTextScale}
-                scaleY={constantTextScale}
-                fill={isMissing ? '#9ca3af' : '#111'} // Faded text
-                fontStyle={isMissing ? 'italic' : 'bold'}
-                align="center"
-                width={200}
-                offsetX={100}
-                perfectDrawEnabled={false}
-            />
-
-            {/* Visuals: Question Mark Center (Overlay) */}
-            {isMissing && (
-                <Text 
-                    x={0}
-                    y={0}
-                    text="?" 
-                    fontSize={14 * nodeScale} // Scale with node
-                    fill="#6b7280" 
-                    fontStyle="bold" 
-                    align="center" 
-                    verticalAlign="middle"
-                    offsetX={5 * nodeScale} // Approximate centering
-                    offsetY={7 * nodeScale}
-                    perfectDrawEnabled={false}
-                />
-            )}
-          </Group>
-        );
-      })}
-    </Group>
+             {/* Actually Deleted Devices (Ghost) Section - Keeping as separate 'Removed' list if needed, or merging conceptually? 
+                 The prompt asked to rename "Unlinked" to "Missing". 
+                 The previously implemented "Missing / Offline" section below handles the *diff* result ghosts.
+                 I will keep it but rename header slightly to distinguish if needed, or keep as is.
+             */}
+             {missingDevices.length > 0 && (
+                 <div className="mt-4 pt-2 border-t border-gray-100 bg-red-50/30 -mx-2 px-2 pb-2">
+                    <div className="flex items-center justify-between mb-2 mt-1">
+                        <div className="flex items-center gap-1 text-[10px] font-bold text-red-400 uppercase">
+                            <AlertTriangle size={10} />
+                            Removed / Offline ({missingDevices.length})
+                        </div>
+                        <button 
+                            onClick={handleClearMissing}
+                            className="text-[10px] text-red-500 hover:text-red-700 hover:bg-red-100 px-1.5 py-0.5 rounded transition-colors"
+                        >
+                            Clear
+                        </button>
+                    </div>
+                    <div className="space-y-1 opacity-70">
+                        {missingDevices.map((d: any) => {
+                             const customName = descriptionMap ? descriptionMap[d.mac] : null;
+                             const displayName = customName || d.mac.slice(-4);
+                             return (
+                                <div key={d.mac} className="flex items-center px-1 py-1 text-xs text-gray-400 font-mono cursor-not-allowed border border-transparent hover:border-red-100 rounded">
+                                    <div className="w-4 flex justify-center"><Circle size={8} className="fill-gray-300 text-gray-400" /></div>
+                                    <span className="line-through">{displayName}</span>
+                                </div>
+                             );
+                        })}
+                    </div>
+                 </div>
+             )}
+          </div>
+        </div>
+      )}
+    </div>
   );
-});`;
+};
 
-        content = content.replace(nodesComponentRegex, newNodesComponent);
-        fs.writeFileSync(path.join(componentsPath, 'FloorPlanEditor.tsx'), content);
-        console.log('✅ FloorPlanEditor.tsx: Updated Ghost Visuals (Dashed Circle + Question Mark).');
-    } else {
-        console.warn('⚠️ Could not locate Nodes component to patch.');
-    }
+const AddLoopInput = ({ activeIds, onAdd, onCancel }: any) => {
+    const [val, setVal] = useState('');
+    const [error, setError] = useState<string|null>(null);
+    const handleSubmit = () => {
+        const id = parseInt(val);
+        if (isNaN(id) || id < 1 || id > 24) { setError('1-24'); return; }
+        if (activeIds.includes(id)) { setError('Exists'); return; }
+        onAdd(id); setVal(''); onCancel();
+    };
+    return (
+        <div className="flex items-center gap-1 bg-gray-100 p-1 rounded">
+            <input autoFocus type="number" className="w-12 px-1 py-0.5 text-xs border rounded" value={val} onChange={e=>setVal(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSubmit()} />
+            <button onClick={handleSubmit} className="text-green-600"><Check size={14}/></button>
+            <button onClick={onCancel} className="text-gray-500"><X size={14}/></button>
+        </div>
+    );
+};
 
-} catch (e) {
-    console.error('❌ Error patching FloorPlanEditor.tsx', e);
-}
+export const DeviceSidebar = () => {
+  const { unassignedDevices, edges, activeLoopIds, addLoop, importLoopData, clearAll, removeLoop, selectedDeviceIds, setBulkSelection, clearDeviceSelection } = useTopologyStore();
+  const { removeNodesByDeviceIds, getAllNodeDescriptions } = useSiteStore();
+  const descriptionMap = getAllNodeDescriptions();
+  
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isAddingLoop, setIsAddingLoop] = useState(false);
+  
+  const selectedSet = new Set(selectedDeviceIds);
 
-console.log('🏁 All requests finalized.');
+  const toggleSelect = (node: any) => {
+      const idsToToggle = [node.mac];
+      if (node.children && node.children.length > 0) {
+          node.children.forEach((c: any) => idsToToggle.push(c.mac));
+      }
+      const isCurrentlySelected = selectedSet.has(node.mac);
+      const targetState = !isCurrentlySelected;
+      setBulkSelection(idsToToggle, targetState);
+  };
+
+  const handleDeleteLoop = (loopId: number) => {
+      const devicesToDelete = unassignedDevices.filter(d => d.loopId === loopId).map(d => d.mac);
+      removeNodesByDeviceIds(devicesToDelete);
+      removeLoop(loopId);
+  };
+
+  const handleImportLoop = (loopId: number, devices: any[], edges: any[]) => {
+      importLoopData(loopId, devices, edges, (droppedIds) => {
+          removeNodesByDeviceIds(droppedIds);
+      });
+  };
+
+  const handleBgClick = (e: React.MouseEvent) => {
+      if (e.target === e.currentTarget) clearDeviceSelection();
+  };
+
+  return (
+    <div className="w-full h-full flex flex-col bg-white overflow-hidden" onClick={handleBgClick}>
+      <div className="shrink-0 border-b border-gray-200 bg-white z-10 px-4 py-3">
+        <div className="flex items-center justify-between mb-2">
+            <h2 className="font-semibold text-gray-800 flex items-center gap-2"><Wifi size={18} className="text-indigo-600"/>Loops</h2>
+            <div className="flex gap-1">
+              {isAddingLoop ? <AddLoopInput activeIds={activeLoopIds} onAdd={addLoop} onCancel={()=>setIsAddingLoop(false)} /> : 
+                <>
+                <button onClick={()=>setIsAddingLoop(true)} disabled={activeLoopIds.length>=24} className="flex items-center gap-1 px-2 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700 disabled:opacity-50"><Plus size={14}/> Add Loop</button>
+                <button onClick={()=>confirm('Clear?')&&clearAll()} className="p-1.5 text-gray-400 hover:text-red-600"><Trash2 size={16}/></button>
+                </>
+              }
+            </div>
+        </div>
+        <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400"/>
+            <input type="text" placeholder="Search..." className="w-full pl-8 py-1.5 text-xs border rounded" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}/>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 custom-scrollbar bg-gray-50/30">
+        {activeLoopIds.map(loopId => (
+             <LoopItem 
+                key={loopId} 
+                loopId={loopId} 
+                devices={unassignedDevices.filter(d=>d.loopId===loopId)} 
+                edges={edges} 
+                allDevices={unassignedDevices} 
+                searchQuery={searchQuery} 
+                onImport={handleImportLoop} 
+                selectedIds={selectedSet}
+                onToggleSelect={toggleSelect}
+                onDeleteLoop={handleDeleteLoop}
+                onClearSelect={clearDeviceSelection}
+                descriptionMap={descriptionMap}
+             />
+        ))}
+      </div>
+    </div>
+  );
+};
+`;
+
+fs.writeFileSync(path.join(componentsPath, 'DeviceSidebar.tsx'), sidebarContent);
+console.log('✅ Sidebar Updated: Unlinked renamed to "Missing Devices" & Disabled');

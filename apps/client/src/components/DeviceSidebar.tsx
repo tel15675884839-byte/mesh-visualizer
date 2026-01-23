@@ -5,20 +5,20 @@ import { useSiteStore } from '../store/useSiteStore';
 import { buildTopologyTree, filterTopologyNodes, validateMacConflicts } from '../utils/topologyTree';
 import type { TopologyTreeNode, Device } from '../utils/topologyTree';
 import { parseTopologyFile } from '../utils/fileParser';
-// ADDED: Eye
 import { ChevronRight, ChevronDown, Wifi, Signal, Search, Trash2, X, Plus, Upload, RefreshCw, Check, Play, Circle, Box as BoxIcon, Square, CheckSquare, AlertTriangle, Eye } from 'lucide-react';
 import axios from 'axios';
 
 // --- Tree Node ---
-const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, descriptionMap }: any) => {
+// Added forceDisabled prop to treat nodes as missing/readonly
+const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, descriptionMap, forceDisabled }: any) => {
   const { isNodeDeployed, findNodeLocation, setActiveView } = useSiteStore();
   const [isExpanded, setIsExpanded] = useState(node.forceExpand ?? (node.role === 'LEADER'));
   const isDeployed = isNodeDeployed(node.mac);
   const isSelected = selectedIds.has(node.mac);
   
-  // Status Flags
-  const isMissing = node.status === 'missing';
-  const isNew = node.isNew && !isDeployed; // Only highlight if not yet placed
+  // LOGIC UPDATE: forceDisabled makes the node behave exactly like 'missing' (gray, no drag)
+  const isMissing = node.status === 'missing' || forceDisabled;
+  const isNew = node.isNew && !isDeployed;
 
   React.useEffect(() => {
     if (node.forceExpand) setIsExpanded(true);
@@ -33,7 +33,10 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
   };
 
   const handleDragStart = (e: React.DragEvent) => {
-    if (isDeployed || isMissing) { e.preventDefault(); return; } // Block drag
+    if (isDeployed || isMissing) { 
+        e.preventDefault(); 
+        return; 
+    }
     const effectivePayload = isSelected ? Array.from(selectedIds) : [node.mac];
     e.dataTransfer.setData('application/json', JSON.stringify({ ids: effectivePayload }));
   };
@@ -47,7 +50,6 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
       }
   };
 
-  // Resolve Alias
   const customName = descriptionMap ? descriptionMap[node.mac] : null;
   const displayName = customName || (node.mac ? node.mac.slice(-4) : node.id);
 
@@ -56,12 +58,13 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
       <div 
         className={`flex items-center py-1.5 pr-2 pl-0 rounded-r-md transition-colors group 
             ${isSelected ? 'bg-indigo-50' : 'hover:bg-gray-100'} 
-            ${(isDeployed || isMissing) ? 'opacity-70 cursor-not-allowed' : 'cursor-grab active:cursor-grabbing'}
+            ${(isDeployed || isMissing) ? 'opacity-60 cursor-not-allowed' : 'cursor-grab active:cursor-grabbing'}
             ${isNew ? 'bg-yellow-50 border-l-2 border-yellow-400' : ''}
+            ${isMissing ? 'grayscale' : ''} 
         `}
         onClick={(e) => { 
             e.stopPropagation();
-            // Block interaction for missing nodes
+            // Block interactions if missing/disabled
             if (!isMissing) {
                 if (e.ctrlKey || e.metaKey) {
                     toggleSelect(node);
@@ -89,11 +92,10 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
         <div className="flex flex-col truncate flex-1">
             <span className="text-xs font-mono font-medium text-gray-700 truncate group-hover:text-gray-900">
             {node.role === 'CHILD' ? 'Child' : (node.role === 'LEADER' ? 'Leader' : 'Router')} 
-            <span className={`ml-1 ${customName ? 'text-indigo-600 font-bold' : 'text-gray-400'}`}>
+            <span className={`ml-1 ${customName ? 'text-indigo-600 font-bold' : (isMissing ? 'text-gray-400 italic' : 'text-gray-400')}`}>
                 ({displayName})
             </span>
             {isNew && <span className="ml-2 text-[8px] bg-yellow-400 text-white px-1 rounded font-bold shadow-sm">NEW</span>}
-            {isMissing && <span className="ml-2 text-[8px] bg-red-400 text-white px-1 rounded font-bold shadow-sm">MISSING</span>}
             </span>
         </div>
 
@@ -135,6 +137,7 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
                 toggleSelect={toggleSelect}
                 clearSelection={clearSelection}
                 descriptionMap={descriptionMap}
+                forceDisabled={forceDisabled} // Propagate disability
              />
           ))}
         </div>
@@ -144,16 +147,19 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
 };
 
 const LoopItem = ({ loopId, devices, edges, searchQuery, allDevices, onImport, selectedIds, onToggleSelect, onDeleteLoop, onClearSelect, descriptionMap }: any) => {
-  const { setImportError } = useTopologyStore();
-  const { isNodeDeployed } = useSiteStore();
+  const { setImportError, clearMissingNodes } = useTopologyStore();
+  const { isNodeDeployed, removeNodesByDeviceIds } = useSiteStore();
   const [isExpanded, setIsExpanded] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const deployedCount = devices.filter((d: any) => isNodeDeployed(d.mac)).length;
-  const remainingCount = devices.length - deployedCount;
+  const activeDevices = useMemo(() => devices.filter((d: any) => d.status !== 'missing'), [devices]);
+  const missingDevices = useMemo(() => devices.filter((d: any) => d.status === 'missing'), [devices]);
+
+  const deployedCount = activeDevices.filter((d: any) => isNodeDeployed(d.mac)).length;
+  const remainingCount = activeDevices.length - deployedCount;
 
   const { roots, orphans } = useMemo(() => {
-    const rawTree = buildTopologyTree(devices, edges);
+    const rawTree = buildTopologyTree(activeDevices, edges);
     const sortedRoots = rawTree.roots.sort((a, b) => {
         if (a.role === 'LEADER') return -1;
         if (b.role === 'LEADER') return 1;
@@ -163,7 +169,7 @@ const LoopItem = ({ loopId, devices, edges, searchQuery, allDevices, onImport, s
       roots: filterTopologyNodes(sortedRoots, searchQuery, descriptionMap),
       orphans: filterTopologyNodes(rawTree.orphans, searchQuery, descriptionMap)
     };
-  }, [devices, edges, searchQuery, descriptionMap]);
+  }, [activeDevices, edges, searchQuery, descriptionMap]);
 
   const handleMultiDragStart = (e: React.DragEvent) => {
       const ids = Array.from(selectedIds) as string[];
@@ -200,23 +206,26 @@ const LoopItem = ({ loopId, devices, edges, searchQuery, allDevices, onImport, s
       reader.readAsText(file);
   };
 
+  const handleClearMissing = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if(confirm(`Delete ${missingDevices.length} missing devices?`)) {
+          clearMissingNodes(loopId, (ids) => removeNodesByDeviceIds(ids));
+      }
+  };
+
   return (
     <div className="mb-4 border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm" draggable={selectedIds.size > 0}>
       <div className="flex items-center justify-between px-3 py-2 bg-gray-50 cursor-pointer hover:bg-gray-100" onClick={() => setIsExpanded(!isExpanded)}>
         <div className="flex items-center gap-2">
            {isExpanded ? <ChevronDown size={14} className="text-gray-500" /> : <ChevronRight size={14} className="text-gray-500" />}
            <span className="font-semibold text-xs text-gray-700">LOOP {loopId}</span>
-           <span className="text-[10px] text-gray-400 bg-white px-1.5 rounded border border-gray-200" title="Total Devices">
-             {devices.length}
+           <span className="text-[10px] text-gray-400 bg-white px-1.5 rounded border border-gray-200" title="Active Devices">
+             {activeDevices.length}
            </span>
-           
            {remainingCount > 0 && (
                <span className="text-[10px] text-white bg-indigo-500 px-1.5 rounded border border-indigo-600 font-medium">
                  {remainingCount} Left
                </span>
-           )}
-           {remainingCount === 0 && devices.length > 0 && (
-               <span className="text-[10px] text-green-600 bg-green-100 px-1.5 rounded font-medium">Done</span>
            )}
         </div>
         <div className="flex items-center gap-1">
@@ -225,16 +234,65 @@ const LoopItem = ({ loopId, devices, edges, searchQuery, allDevices, onImport, s
            <input ref={fileInputRef} type="file" className="hidden" accept=".json,.html" onChange={handleFileChange} />
         </div>
       </div>
+      
       {isExpanded && (
         <div className="p-2 min-h-[40px]" onDragStart={handleMultiDragStart}>
           <div className="space-y-1">
              {roots.map((root: any) => (
                  <TreeNode key={root.id} node={root} selectedIds={selectedIds} toggleSelect={onToggleSelect} clearSelection={onClearSelect} descriptionMap={descriptionMap} />
              ))}
-             {orphans.length > 0 && <div className="mt-2 text-[10px] text-amber-500 font-bold px-1">UNLINKED</div>}
+             
+             {/* RENAMED SECTION: Missing Devices (formerly Unlinked) */}
+             {orphans.length > 0 && (
+                <div className="mt-2 text-[10px] text-gray-400 font-bold px-1 uppercase tracking-wider border-t border-gray-100 pt-2">
+                    Missing Devices
+                </div>
+             )}
              {orphans.map((orphan: any) => (
-                 <TreeNode key={orphan.id} node={orphan} selectedIds={selectedIds} toggleSelect={onToggleSelect} clearSelection={onClearSelect} descriptionMap={descriptionMap} />
+                 <TreeNode 
+                    key={orphan.id} 
+                    node={orphan} 
+                    selectedIds={selectedIds} 
+                    toggleSelect={onToggleSelect} 
+                    clearSelection={onClearSelect} 
+                    descriptionMap={descriptionMap}
+                    forceDisabled={true} // FORCE DISABLE
+                 />
              ))}
+
+             {/* Actually Deleted Devices (Ghost) Section - Keeping as separate 'Removed' list if needed, or merging conceptually? 
+                 The prompt asked to rename "Unlinked" to "Missing". 
+                 The previously implemented "Missing / Offline" section below handles the *diff* result ghosts.
+                 I will keep it but rename header slightly to distinguish if needed, or keep as is.
+             */}
+             {missingDevices.length > 0 && (
+                 <div className="mt-4 pt-2 border-t border-gray-100 bg-red-50/30 -mx-2 px-2 pb-2">
+                    <div className="flex items-center justify-between mb-2 mt-1">
+                        <div className="flex items-center gap-1 text-[10px] font-bold text-red-400 uppercase">
+                            <AlertTriangle size={10} />
+                            Removed / Offline ({missingDevices.length})
+                        </div>
+                        <button 
+                            onClick={handleClearMissing}
+                            className="text-[10px] text-red-500 hover:text-red-700 hover:bg-red-100 px-1.5 py-0.5 rounded transition-colors"
+                        >
+                            Clear
+                        </button>
+                    </div>
+                    <div className="space-y-1 opacity-70">
+                        {missingDevices.map((d: any) => {
+                             const customName = descriptionMap ? descriptionMap[d.mac] : null;
+                             const displayName = customName || d.mac.slice(-4);
+                             return (
+                                <div key={d.mac} className="flex items-center px-1 py-1 text-xs text-gray-400 font-mono cursor-not-allowed border border-transparent hover:border-red-100 rounded">
+                                    <div className="w-4 flex justify-center"><Circle size={8} className="fill-gray-300 text-gray-400" /></div>
+                                    <span className="line-through">{displayName}</span>
+                                </div>
+                             );
+                        })}
+                    </div>
+                 </div>
+             )}
           </div>
         </div>
       )}
@@ -263,10 +321,11 @@ const AddLoopInput = ({ activeIds, onAdd, onCancel }: any) => {
 export const DeviceSidebar = () => {
   const { unassignedDevices, edges, activeLoopIds, addLoop, importLoopData, clearAll, removeLoop, selectedDeviceIds, setBulkSelection, clearDeviceSelection } = useTopologyStore();
   const { removeNodesByDeviceIds, getAllNodeDescriptions } = useSiteStore();
-  const descriptionMap = getAllNodeDescriptions(); // Get descriptions
+  const descriptionMap = getAllNodeDescriptions();
   
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddingLoop, setIsAddingLoop] = useState(false);
+  
   const selectedSet = new Set(selectedDeviceIds);
 
   const toggleSelect = (node: any) => {
@@ -326,8 +385,8 @@ export const DeviceSidebar = () => {
                 onImport={handleImportLoop} 
                 selectedIds={selectedSet}
                 onToggleSelect={toggleSelect}
-                onClearSelect={clearDeviceSelection}
                 onDeleteLoop={handleDeleteLoop}
+                onClearSelect={clearDeviceSelection}
                 descriptionMap={descriptionMap}
              />
         ))}
