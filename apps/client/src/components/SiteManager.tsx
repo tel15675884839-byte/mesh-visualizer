@@ -26,7 +26,6 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ onClose }) => {
   const [selFloorId, setSelFloorId] = useState<string | null>(activeFloorId);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   
-  // Use a ref to control the file input programmatically
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (activeBuildingId) setSelBuildingId(activeBuildingId); }, [activeBuildingId]);
@@ -35,7 +34,6 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ onClose }) => {
   const selectedBuilding = buildings.find(b => b.id === selBuildingId);
   const selectedFloor = selectedBuilding?.floors.find(f => f.id === selFloorId);
 
-  // Image Loading Logic
   useEffect(() => {
     setPreviewUrl(null); 
     if (!selectedFloor?.mapId) return;
@@ -53,7 +51,6 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ onClose }) => {
     };
   }, [selectedFloor?.mapId]); 
 
-  // Handlers
   const handleAddBuilding = () => {
     const name = prompt("Enter Building Name:", `Building ${buildings.length + 1}`);
     if (name !== null) addBuilding(name || undefined);
@@ -66,7 +63,6 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ onClose }) => {
   };
 
   const triggerFileUpload = () => {
-    // CRITICAL FIX 1: Reset input value BEFORE clicking to allow re-uploading same file or new file reliably
     if (fileInputRef.current) {
         fileInputRef.current.value = '';
         fileInputRef.current.click();
@@ -90,7 +86,6 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ onClose }) => {
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm">
       <div className="bg-white w-[960px] h-[600px] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
         
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gray-50/50">
           <div className="flex items-center gap-2">
             <Map className="text-indigo-600" size={24} />
@@ -174,26 +169,18 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ onClose }) => {
                  <p className="text-sm">Select a floor to edit details</p>
                </div>
              ) : (
-               <div className="p-6 space-y-6 overflow-y-auto">
-                 <div className="flex items-center justify-between">
+               <div className="p-6 h-full flex flex-col">
+                 <div className="flex items-center justify-between mb-6">
                    <h3 className="text-md font-bold text-gray-800">Floor Settings</h3>
-                   <div className="flex gap-2">
-                       <button 
-                          onClick={() => { setActiveView(selBuildingId, selFloorId); onClose(); }}
-                          className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-md hover:bg-indigo-700 transition-colors"
-                       >
-                         Open in Editor
-                       </button>
-                       <button 
-                          onClick={handleDeleteFloor}
-                          className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1 px-3 py-1.5 rounded-md hover:bg-red-50 transition-colors"
-                       >
-                         <Trash2 size={12} /> Delete
-                       </button>
-                   </div>
+                   <button 
+                      onClick={handleDeleteFloor}
+                      className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1 px-3 py-1.5 rounded-md hover:bg-red-50 transition-colors"
+                   >
+                     <Trash2 size={12} /> Delete
+                   </button>
                  </div>
                  
-                 <div className="grid grid-cols-2 gap-4">
+                 <div className="grid grid-cols-2 gap-4 mb-6">
                    <div className="space-y-1">
                      <label className="text-xs font-semibold text-gray-500">Name</label>
                      <input type="text" value={selectedFloor.name} onChange={(e) => updateFloor(selBuildingId!, selFloorId, { name: e.target.value })} className="w-full text-sm p-2 border border-gray-300 rounded" />
@@ -204,10 +191,8 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ onClose }) => {
                    </div>
                  </div>
 
-                 <div className="space-y-2">
+                 <div className="space-y-2 flex-1">
                    <label className="text-xs font-semibold text-gray-500">Floor Plan</label>
-                   
-                   {/* File Input is HIDDEN and controlled via ref */}
                    <input 
                       ref={fileInputRef}
                       type="file" 
@@ -215,14 +200,13 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ onClose }) => {
                       className="hidden" 
                       onChange={handleFileChange} 
                    />
-
                    <div 
                       onClick={triggerFileUpload}
-                      className="relative group border-2 border-dashed border-gray-300 rounded-xl bg-white min-h-[240px] flex items-center justify-center overflow-hidden hover:border-indigo-400 transition-colors cursor-pointer"
+                      className="relative group border-2 border-dashed border-gray-300 rounded-xl bg-white h-[200px] flex items-center justify-center overflow-hidden hover:border-indigo-400 transition-colors cursor-pointer"
                    >
                       {previewUrl ? (
                         <div className="relative w-full h-full flex items-center justify-center bg-gray-100">
-                          <img src={previewUrl} alt="Plan" className="max-w-full max-h-[300px] object-contain" />
+                          <img src={previewUrl} alt="Plan" className="max-w-full max-h-[100%] object-contain" />
                           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-sm">Click to Replace</div>
                         </div>
                       ) : (
@@ -232,6 +216,16 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ onClose }) => {
                         </div>
                       )}
                    </div>
+                 </div>
+
+                 {/* BUTTON MOVED TO BOTTOM */}
+                 <div className="mt-auto pt-4 border-t border-gray-200">
+                     <button 
+                        onClick={() => { setActiveView(selBuildingId, selFloorId); onClose(); }}
+                        className="w-full bg-indigo-600 text-white px-4 py-3 rounded-lg hover:bg-indigo-700 transition-colors font-semibold flex items-center justify-center gap-2"
+                     >
+                       <Map size={18} /> Open in Editor
+                     </button>
                  </div>
                </div>
              )}

@@ -9,14 +9,12 @@ import { ChevronRight, ChevronDown, Wifi, Signal, Search, Trash2, X, Plus, Uploa
 import axios from 'axios';
 
 // --- Tree Node ---
-// Added forceDisabled prop to treat nodes as missing/readonly
 const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, descriptionMap, forceDisabled }: any) => {
   const { isNodeDeployed, findNodeLocation, setActiveView } = useSiteStore();
   const [isExpanded, setIsExpanded] = useState(node.forceExpand ?? (node.role === 'LEADER'));
   const isDeployed = isNodeDeployed(node.mac);
   const isSelected = selectedIds.has(node.mac);
   
-  // Status Flags
   const isMissing = node.status === 'missing' || forceDisabled;
   const isNew = node.isNew && !isDeployed;
 
@@ -45,7 +43,6 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
           setActiveView(loc.buildingId, loc.floorId);
           window.dispatchEvent(new CustomEvent('FOCUS_NODE', { detail: { x: loc.x, y: loc.y, id: node.mac } }));
       } else {
-          // Fallback if not found on map (shouldn't happen if isDeployed is true)
           alert("Device location not found on map.");
       }
   };
@@ -71,7 +68,6 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
                     setIsExpanded(!isExpanded);
                 }
             } else {
-                // For Deployed/Missing, allow expand toggle
                 setIsExpanded(!isExpanded);
             }
         }}
@@ -107,7 +103,6 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
         )}
 
         <div className="flex items-center gap-1">
-            {/* ENABLE EYE FOR ANY DEPLOYED NODE (Active OR Missing) */}
             {isDeployed ? (
                 <button 
                     onClick={handleFocus}
@@ -248,7 +243,6 @@ const LoopItem = ({ loopId, devices, edges, searchQuery, allDevices, onImport, s
                  <TreeNode key={root.id} node={root} selectedIds={selectedIds} toggleSelect={onToggleSelect} clearSelection={onClearSelect} descriptionMap={descriptionMap} />
              ))}
              
-             {/* RENAMED SECTION: Missing Devices (formerly Unlinked) */}
              {orphans.length > 0 && (
                 <div className="mt-2 text-[10px] text-gray-400 font-bold px-1 uppercase tracking-wider border-t border-gray-100 pt-2">
                     Missing Devices
@@ -262,15 +256,10 @@ const LoopItem = ({ loopId, devices, edges, searchQuery, allDevices, onImport, s
                     toggleSelect={onToggleSelect} 
                     clearSelection={onClearSelect} 
                     descriptionMap={descriptionMap}
-                    forceDisabled={true} // FORCE DISABLE
+                    forceDisabled={true}
                  />
              ))}
 
-             {/* Actually Deleted Devices (Ghost) Section - Keeping as separate 'Removed' list if needed, or merging conceptually? 
-                 The prompt asked to rename "Unlinked" to "Missing". 
-                 The previously implemented "Missing / Offline" section below handles the *diff* result ghosts.
-                 I will keep it but rename header slightly to distinguish if needed, or keep as is.
-             */}
              {missingDevices.length > 0 && (
                  <div className="mt-4 pt-2 border-t border-gray-100 bg-red-50/30 -mx-2 px-2 pb-2">
                     <div className="flex items-center justify-between mb-2 mt-1">
@@ -306,20 +295,44 @@ const LoopItem = ({ loopId, devices, edges, searchQuery, allDevices, onImport, s
   );
 };
 
-const AddLoopInput = ({ activeIds, onAdd, onCancel }: any) => {
+// --- NEW: Add Loop Modal ---
+const AddLoopModal = ({ activeIds, onAdd, onClose }: any) => {
     const [val, setVal] = useState('');
     const [error, setError] = useState<string|null>(null);
+
     const handleSubmit = () => {
         const id = parseInt(val);
-        if (isNaN(id) || id < 1 || id > 24) { setError('1-24'); return; }
-        if (activeIds.includes(id)) { setError('Exists'); return; }
-        onAdd(id); setVal(''); onCancel();
+        if (isNaN(id)) { setError('Please enter a number'); return; }
+        if (id < 1 || id > 24) { setError('Loop ID must be between 1 and 24'); return; }
+        if (activeIds.includes(id)) { setError('Loop ID already exists'); return; }
+        onAdd(id);
+        onClose();
     };
+
     return (
-        <div className="flex items-center gap-1 bg-gray-100 p-1 rounded">
-            <input autoFocus type="number" className="w-12 px-1 py-0.5 text-xs border rounded" value={val} onChange={e=>setVal(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSubmit()} />
-            <button onClick={handleSubmit} className="text-green-600"><Check size={14}/></button>
-            <button onClick={onCancel} className="text-gray-500"><X size={14}/></button>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-80 animate-in fade-in zoom-in duration-200">
+                <h3 className="text-lg font-bold text-gray-800 mb-4">Add New Loop</h3>
+                <div className="space-y-3">
+                    <div>
+                        <label className="block text-xs font-semibold text-gray-500 mb-1">Loop ID (1-24)</label>
+                        <input 
+                            autoFocus
+                            type="number" 
+                            className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            placeholder="e.g. 1"
+                            value={val}
+                            onChange={(e) => { setVal(e.target.value); setError(null); }}
+                            onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+                        />
+                        {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2">
+                        <button onClick={onClose} className="px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded">Cancel</button>
+                        <button onClick={handleSubmit} className="px-3 py-2 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700">Confirm</button>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 };
@@ -330,7 +343,8 @@ export const DeviceSidebar = () => {
   const descriptionMap = getAllNodeDescriptions();
   
   const [searchQuery, setSearchQuery] = useState('');
-  const [isAddingLoop, setIsAddingLoop] = useState(false);
+  // Replaced inline state with modal state
+  const [showAddModal, setShowAddModal] = useState(false);
   
   const selectedSet = new Set(selectedDeviceIds);
 
@@ -361,42 +375,55 @@ export const DeviceSidebar = () => {
   };
 
   return (
-    <div className="w-full h-full flex flex-col bg-white overflow-hidden" onClick={handleBgClick}>
-      <div className="shrink-0 border-b border-gray-200 bg-white z-10 px-4 py-3">
-        <div className="flex items-center justify-between mb-2">
-            <h2 className="font-semibold text-gray-800 flex items-center gap-2"><Wifi size={18} className="text-indigo-600"/>Loops</h2>
-            <div className="flex gap-1">
-              {isAddingLoop ? <AddLoopInput activeIds={activeLoopIds} onAdd={addLoop} onCancel={()=>setIsAddingLoop(false)} /> : 
-                <>
-                <button onClick={()=>setIsAddingLoop(true)} disabled={activeLoopIds.length>=24} className="flex items-center gap-1 px-2 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700 disabled:opacity-50"><Plus size={14}/> Add Loop</button>
-                <button onClick={()=>confirm('Clear?')&&clearAll()} className="p-1.5 text-gray-400 hover:text-red-600"><Trash2 size={16}/></button>
-                </>
-              }
+    <>
+        <div className="w-full h-full flex flex-col bg-white overflow-hidden" onClick={handleBgClick}>
+        <div className="shrink-0 border-b border-gray-200 bg-white z-10 px-4 py-3">
+            <div className="flex items-center justify-between mb-2">
+                <h2 className="font-semibold text-gray-800 flex items-center gap-2"><Wifi size={18} className="text-indigo-600"/>Loops</h2>
+                <div className="flex gap-1">
+                    <button 
+                        onClick={() => setShowAddModal(true)} 
+                        disabled={activeLoopIds.length>=24} 
+                        className="flex items-center gap-1 px-2 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                        <Plus size={14}/> Add Loop
+                    </button>
+                    <button onClick={()=>confirm('Clear?')&&clearAll()} className="p-1.5 text-gray-400 hover:text-red-600"><Trash2 size={16}/></button>
+                </div>
+            </div>
+            <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400"/>
+                <input type="text" placeholder="Search..." className="w-full pl-8 py-1.5 text-xs border rounded" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}/>
             </div>
         </div>
-        <div className="relative">
-            <Search size={14} className="absolute left-2.5 top-2.5 text-gray-400"/>
-            <input type="text" placeholder="Search..." className="w-full pl-8 py-1.5 text-xs border rounded" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}/>
+        <div className="flex-1 overflow-y-auto p-3 custom-scrollbar bg-gray-50/30">
+            {activeLoopIds.map(loopId => (
+                <LoopItem 
+                    key={loopId} 
+                    loopId={loopId} 
+                    devices={unassignedDevices.filter(d=>d.loopId===loopId)} 
+                    edges={edges} 
+                    allDevices={unassignedDevices} 
+                    searchQuery={searchQuery} 
+                    onImport={handleImportLoop} 
+                    selectedIds={selectedSet}
+                    onToggleSelect={toggleSelect}
+                    onDeleteLoop={handleDeleteLoop}
+                    onClearSelect={clearDeviceSelection}
+                    descriptionMap={descriptionMap}
+                />
+            ))}
         </div>
-      </div>
-      <div className="flex-1 overflow-y-auto p-3 custom-scrollbar bg-gray-50/30">
-        {activeLoopIds.map(loopId => (
-             <LoopItem 
-                key={loopId} 
-                loopId={loopId} 
-                devices={unassignedDevices.filter(d=>d.loopId===loopId)} 
-                edges={edges} 
-                allDevices={unassignedDevices} 
-                searchQuery={searchQuery} 
-                onImport={handleImportLoop} 
-                selectedIds={selectedSet}
-                onToggleSelect={toggleSelect}
-                onDeleteLoop={handleDeleteLoop}
-                onClearSelect={clearDeviceSelection}
-                descriptionMap={descriptionMap}
-             />
-        ))}
-      </div>
-    </div>
+        </div>
+
+        {/* Modal Portal */}
+        {showAddModal && (
+            <AddLoopModal 
+                activeIds={activeLoopIds} 
+                onAdd={addLoop} 
+                onClose={() => setShowAddModal(false)} 
+            />
+        )}
+    </>
   );
 };
