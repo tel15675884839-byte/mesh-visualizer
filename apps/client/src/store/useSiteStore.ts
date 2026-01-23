@@ -44,6 +44,7 @@ interface SiteStore {
   setBaseFontSize: (size: number) => void; // NEW Action
   setViewState: (x: number, y: number, scale: number) => void;
   getActiveFloor: () => Floor | undefined;
+  findNodeDescription: (nodeId: string) => string | undefined;
   getAllNodeDescriptions: () => Record<string, string>;
   
   reset: () => void;
@@ -165,6 +166,17 @@ export const useSiteStore = create<SiteStore>()(
           });
           return map;
       },
+      findNodeDescription: (nodeId) => {
+        const { buildings } = get();
+        for (const b of buildings) {
+          for (const f of b.floors) {
+            const node = f.nodes.find((n) => n.id === nodeId);
+            if (node && node.description) return node.description;
+          }
+        }
+        return undefined;
+      },
+
       reset: () => set({ buildings: [], activeBuildingId: null, activeFloorId: null, nodeScale: 1.0, baseFontSize: 14, viewState: { x:0, y:0, scale:1 } }),
       loadState: (state) => set({ 
         buildings: state.buildings || [], 
