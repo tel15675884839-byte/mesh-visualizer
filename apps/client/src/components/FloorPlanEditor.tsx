@@ -271,6 +271,7 @@ const Nodes = React.memo(({
                 width={200}
                 offsetX={100}
                 perfectDrawEnabled={false}
+            listening={false}
             />
             {isMissing && <Text y={-baseRadius - (15/currentScale)} text="?" fontSize={14/currentScale} fill="red" fontStyle="bold" align="center" offsetX={4} />}
           </Group>
