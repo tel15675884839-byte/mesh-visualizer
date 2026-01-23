@@ -16,7 +16,7 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
   const isDeployed = isNodeDeployed(node.mac);
   const isSelected = selectedIds.has(node.mac);
   
-  // LOGIC UPDATE: forceDisabled makes the node behave exactly like 'missing' (gray, no drag)
+  // Status Flags
   const isMissing = node.status === 'missing' || forceDisabled;
   const isNew = node.isNew && !isDeployed;
 
@@ -33,10 +33,7 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
   };
 
   const handleDragStart = (e: React.DragEvent) => {
-    if (isDeployed || isMissing) { 
-        e.preventDefault(); 
-        return; 
-    }
+    if (isDeployed || isMissing) { e.preventDefault(); return; }
     const effectivePayload = isSelected ? Array.from(selectedIds) : [node.mac];
     e.dataTransfer.setData('application/json', JSON.stringify({ ids: effectivePayload }));
   };
@@ -46,7 +43,10 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
       const loc = findNodeLocation(node.mac);
       if (loc) {
           setActiveView(loc.buildingId, loc.floorId);
-          window.dispatchEvent(new CustomEvent('FOCUS_NODE', { detail: { x: loc.x, y: loc.y } }));
+          window.dispatchEvent(new CustomEvent('FOCUS_NODE', { detail: { x: loc.x, y: loc.y, id: node.mac } }));
+      } else {
+          // Fallback if not found on map (shouldn't happen if isDeployed is true)
+          alert("Device location not found on map.");
       }
   };
 
@@ -58,20 +58,21 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
       <div 
         className={`flex items-center py-1.5 pr-2 pl-0 rounded-r-md transition-colors group 
             ${isSelected ? 'bg-indigo-50' : 'hover:bg-gray-100'} 
-            ${(isDeployed || isMissing) ? 'opacity-60 cursor-not-allowed' : 'cursor-grab active:cursor-grabbing'}
+            ${isDeployed ? 'opacity-100' : 'cursor-grab active:cursor-grabbing'} 
             ${isNew ? 'bg-yellow-50 border-l-2 border-yellow-400' : ''}
-            ${isMissing ? 'grayscale' : ''} 
+            ${isMissing ? 'bg-gray-50/50' : ''} 
         `}
         onClick={(e) => { 
             e.stopPropagation();
-            // Block interactions if missing/disabled
-            if (!isMissing) {
-                if (e.ctrlKey || e.metaKey) {
-                    toggleSelect(node);
-                } else {
+            if (!isMissing && !isDeployed) {
+                if (e.ctrlKey || e.metaKey) toggleSelect(node);
+                else {
                     if (selectedIds.size > 0) clearSelection();
                     setIsExpanded(!isExpanded);
                 }
+            } else {
+                // For Deployed/Missing, allow expand toggle
+                setIsExpanded(!isExpanded);
             }
         }}
         draggable={!isDeployed && !isMissing}
@@ -92,7 +93,7 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
         <div className="flex flex-col truncate flex-1">
             <span className="text-xs font-mono font-medium text-gray-700 truncate group-hover:text-gray-900">
             {node.role === 'CHILD' ? 'Child' : (node.role === 'LEADER' ? 'Leader' : 'Router')} 
-            <span className={`ml-1 ${customName ? 'text-indigo-600 font-bold' : (isMissing ? 'text-gray-400 italic' : 'text-gray-400')}`}>
+            <span className={`ml-1 ${customName ? 'text-indigo-600 font-bold' : (isMissing ? 'text-gray-400 italic line-through' : 'text-gray-400')}`}>
                 ({displayName})
             </span>
             {isNew && <span className="ml-2 text-[8px] bg-yellow-400 text-white px-1 rounded font-bold shadow-sm">NEW</span>}
@@ -106,8 +107,13 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
         )}
 
         <div className="flex items-center gap-1">
+            {/* ENABLE EYE FOR ANY DEPLOYED NODE (Active OR Missing) */}
             {isDeployed ? (
-                <button onClick={handleFocus} className="p-1 text-gray-400 hover:text-indigo-600 rounded-full hover:bg-indigo-50 transition-colors" title="Locate on Map">
+                <button 
+                    onClick={handleFocus}
+                    className={`p-1 rounded-full transition-colors ${isMissing ? 'text-red-400 hover:text-red-600 hover:bg-red-50' : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                    title={isMissing ? "Locate Missing Device" : "Locate on Map"}
+                >
                     <Eye size={14} />
                 </button>
             ) : (
@@ -137,7 +143,7 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
                 toggleSelect={toggleSelect}
                 clearSelection={clearSelection}
                 descriptionMap={descriptionMap}
-                forceDisabled={forceDisabled} // Propagate disability
+                forceDisabled={forceDisabled}
              />
           ))}
         </div>
