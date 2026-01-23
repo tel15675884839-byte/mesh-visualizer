@@ -8,11 +8,9 @@ import { useTopologyStore } from '../store/useTopologyStore';
 import { getImage } from '../utils/storage';
 import { Layers, ZoomIn, Trash2, Eraser, X, Pencil, Type } from 'lucide-react';
 
-// --- Constants & Types ---
 const STAGE_WIDTH_OFFSET = 350;
 const DEBOUNCE_MS = 500;
 
-// --- Helper: Debounce ---
 function useDebounceCallback<T extends (...args: any[]) => void>(callback: T, delay: number) {
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   return useCallback((...args: Parameters<T>) => {
@@ -23,22 +21,17 @@ function useDebounceCallback<T extends (...args: any[]) => void>(callback: T, de
   }, [callback, delay]);
 }
 
-// --- Component: FloorImage ---
 const FloorImage = React.memo(({ mapId }: { mapId: string }) => {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
-    getImage(mapId).then((blob) => { 
-        if (active && blob) setImageUrl(URL.createObjectURL(blob)); 
-    });
+    getImage(mapId).then((blob) => { if (active && blob) setImageUrl(URL.createObjectURL(blob)); });
     return () => { active = false; if (imageUrl) URL.revokeObjectURL(imageUrl); };
   }, [mapId]);
   const [image] = useImage(imageUrl || '');
   return image ? <KonvaImage image={image} listening={false} perfectDrawEnabled={false} /> : null;
 }, (prev, next) => prev.mapId === next.mapId);
 
-
-// --- Component: Connections ---
 const Connections = React.memo(({ activeFloor, currentScale, layerRef }: { activeFloor: any, currentScale: number, layerRef: React.RefObject<Konva.Layer> }) => {
   const { edges, unassignedDevices } = useTopologyStore();
   const [tooltip, setTooltip] = useState<{ x: number, y: number, text: string } | null>(null);
@@ -78,9 +71,7 @@ const Connections = React.memo(({ activeFloor, currentScale, layerRef }: { activ
             else if (e.title) {
                 const match = e.title.match(/(-?\d+\s*dBm)/i) || e.title.match(/(?:RSSI|Signal)[:\s]*(-?\d+)/i);
                 if (match) rssiVal = match[1];
-            } else if (e.label) {
-                rssiVal = e.label;
-            }
+            } else if (e.label) rssiVal = e.label;
 
             let displaySignal = String(rssiVal);
             if (!displaySignal.includes('dBm') && !isNaN(parseInt(displaySignal))) displaySignal += ' dBm';
@@ -103,37 +94,10 @@ const Connections = React.memo(({ activeFloor, currentScale, layerRef }: { activ
 
         return (
           <Group key={edge.id} id={edge.id}>
-             <Line
-                points={points}
-                stroke="transparent"
-                strokeWidth={15 / currentScale}
-                onMouseEnter={(e) => { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'pointer'; }}
-                onMouseLeave={(e) => { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'default'; }}
-                onClick={(e) => {
-                    e.cancelBubble = true;
-                    const stage = e.target.getStage();
-                    const pointer = stage?.getPointerPosition();
-                    
-                    if (pointer) {
-                        const transform = stage.getAbsoluteTransform().copy();
-                        transform.invert();
-                        const pos = transform.point(pointer);
-                        
-                        if (tooltip?.text === edge.rssi) setTooltip(null);
-                        else setTooltip({ x: pos.x, y: pos.y, text: edge.rssi });
-                    }
-                }}
-                name="hit-line"
-             />
+             <Line points={points} stroke="transparent" strokeWidth={15 / currentScale} onMouseEnter={(e) => { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'pointer'; }} onMouseLeave={(e) => { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'default'; }} onClick={(e) => { e.cancelBubble = true; const stage = e.target.getStage(); const pointer = stage?.getPointerPosition(); if (pointer) { const transform = stage.getAbsoluteTransform().copy(); transform.invert(); const pos = transform.point(pointer); if (tooltip?.text === edge.rssi) setTooltip(null); else setTooltip({ x: pos.x, y: pos.y, text: edge.rssi }); } }} name="hit-line" />
              <Line points={points} stroke="white" strokeWidth={strokeWidth + 2} opacity={0.8} listening={false} perfectDrawEnabled={false} name="outline-line" />
              <Line points={points} stroke={edge.color} strokeWidth={strokeWidth} listening={false} perfectDrawEnabled={false} name="color-line" dash={[10/currentScale, 5/currentScale]} />
-             
-             {tooltip && tooltip.text === edge.rssi && (
-                 <Label x={tooltip.x} y={tooltip.y} listening={false}>
-                    <Tag fill="#1f2937" pointerDirection="down" pointerWidth={10/currentScale} pointerHeight={10/currentScale} cornerRadius={4/currentScale} opacity={0.9} />
-                    <Text text={tooltip.text} fontSize={12/currentScale} padding={6/currentScale} fill="white" align="center" />
-                 </Label>
-             )}
+             {tooltip && tooltip.text === edge.rssi && <Label x={tooltip.x} y={tooltip.y} listening={false}><Tag fill="#1f2937" pointerDirection="down" pointerWidth={10/currentScale} pointerHeight={10/currentScale} cornerRadius={4/currentScale} opacity={0.9} /><Text text={tooltip.text} fontSize={12/currentScale} padding={6/currentScale} fill="white" align="center" /></Label>}
           </Group>
         );
       })}
@@ -141,23 +105,7 @@ const Connections = React.memo(({ activeFloor, currentScale, layerRef }: { activ
   );
 });
 
-
-// --- Component: Nodes ---
-const Nodes = React.memo(({ 
-    activeFloor, 
-    updatePosition, 
-    nodeScale, 
-    currentScale, 
-    baseFontSize, 
-    unassignedDevices,
-    layerRef,
-    isDeleteMode,
-    onRemove,
-    onContextMenu,
-    onDragStart, 
-    onDragEnd 
-}: any) => {
-  
+const Nodes = React.memo(({ activeFloor, updatePosition, nodeScale, currentScale, baseFontSize, unassignedDevices, layerRef, isDeleteMode, onRemove, onContextMenu, onDragStart, onDragEnd }: any) => {
   const getRole = (id: string) => {
     const dev = unassignedDevices.find((d: any) => d.mac === id || d.id === id);
     return (dev?.type || dev?.role || '').toLowerCase();
@@ -171,7 +119,6 @@ const Nodes = React.memo(({
   const updateConnectedLines = (nodeId: string, x: number, y: number) => {
       const layer = layerRef.current;
       if (!layer) return;
-      
       const groups = layer.find('Group'); 
       for (const group of groups) {
           const id = group.id();
@@ -180,16 +127,11 @@ const Nodes = React.memo(({
               const colorLine = group.findOne('.color-line');
               const hitLine = group.findOne('.hit-line');
               if (!colorLine) continue;
-
               const oldPoints = colorLine.points();
               const newPoints = [...oldPoints];
               const isStart = id.startsWith(`edge-${nodeId}-`);
               const isEnd = id.endsWith(`-${nodeId}`);
-
-              if (isStart) { newPoints[0] = x; newPoints[1] = y; } 
-              else if (isEnd) { newPoints[2] = x; newPoints[3] = y; } 
-              else continue;
-
+              if (isStart) { newPoints[0] = x; newPoints[1] = y; } else if (isEnd) { newPoints[2] = x; newPoints[3] = y; } else { continue; }
               if(outline) outline.points(newPoints);
               if(colorLine) colorLine.points(newPoints);
               if(hitLine) hitLine.points(newPoints);
@@ -203,10 +145,8 @@ const Nodes = React.memo(({
         const role = getRole(node.id);
         const status = getStatus(node.id);
         const isMissing = status === 'missing';
-        
         const baseRadius = 10 * nodeScale;
         const constantTextScale = (1 / currentScale); 
-        
         const labelText = node.description ? node.description : node.id.slice(-4);
 
         return (
@@ -217,62 +157,16 @@ const Nodes = React.memo(({
             y={node.y}
             draggable={!isDeleteMode}
             opacity={isMissing ? 0.5 : 1}
-            onClick={(e) => {
-                if (isDeleteMode) {
-                    e.cancelBubble = true;
-                    onRemove(activeFloor.id, node.id);
-                }
-            }}
-            onContextMenu={(e) => {
-                e.evt.preventDefault();
-                e.cancelBubble = true;
-                onContextMenu(e.evt, node.id, node.description);
-            }}
-            onDragStart={(e) => { 
-                e.cancelBubble = true; 
-                onDragStart(node.id); 
-            }}
-            onDragMove={(e) => {
-                e.cancelBubble = true;
-                const newX = e.target.x();
-                const newY = e.target.y();
-                updateConnectedLines(node.id, newX, newY);
-            }}
-            onDragEnd={(e) => {
-                e.cancelBubble = true;
-                onDragEnd();
-                updatePosition(activeFloor.id, node.id, e.target.x(), e.target.y());
-            }}
-            onMouseEnter={(e) => { 
-                if (isDeleteMode) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'crosshair'; }
-            }}
-            onMouseLeave={(e) => {
-                if (isDeleteMode) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'not-allowed'; }
-            }}
+            onClick={(e) => { if (isDeleteMode) { e.cancelBubble = true; onRemove(activeFloor.id, node.id); } }}
+            onContextMenu={(e) => { e.evt.preventDefault(); e.cancelBubble = true; onContextMenu(e.evt, node.id, node.description); }}
+            onDragStart={(e) => { e.cancelBubble = true; onDragStart(node.id); }}
+            onDragMove={(e) => { e.cancelBubble = true; const newX = e.target.x(); const newY = e.target.y(); updateConnectedLines(node.id, newX, newY); }}
+            onDragEnd={(e) => { e.cancelBubble = true; onDragEnd(); updatePosition(activeFloor.id, node.id, e.target.x(), e.target.y()); }}
+            onMouseEnter={(e) => { if (isDeleteMode) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'crosshair'; } }}
+            onMouseLeave={(e) => { if (isDeleteMode) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'not-allowed'; } }}
           >
-            <Circle 
-                radius={baseRadius} 
-                fill={isMissing ? '#9ca3af' : getColor(role)} 
-                stroke={isDeleteMode ? 'red' : 'white'} 
-                strokeWidth={(isDeleteMode ? 3 : 2) / currentScale} 
-                shadowBlur={2} 
-                perfectDrawEnabled={false}
-                dash={isMissing ? [4, 4] : undefined}
-            />
-            <Text 
-                y={baseRadius + (5 / currentScale)} 
-                text={labelText} 
-                fontSize={baseFontSize}
-                scaleX={constantTextScale}
-                scaleY={constantTextScale}
-                fill={isMissing ? '#6b7280' : '#111'}
-                fontStyle="bold" 
-                align="center"
-                width={200}
-                offsetX={100}
-                perfectDrawEnabled={false}
-            listening={false}
-            />
+            <Circle radius={baseRadius} fill={isMissing ? '#9ca3af' : getColor(role)} stroke={isDeleteMode ? 'red' : 'white'} strokeWidth={(isDeleteMode ? 3 : 2) / currentScale} shadowBlur={2} perfectDrawEnabled={false} dash={isMissing ? [4, 4] : undefined} />
+            <Text y={baseRadius + (5 / currentScale)} text={labelText} fontSize={baseFontSize} scaleX={constantTextScale} scaleY={constantTextScale} fill={isMissing ? '#6b7280' : '#111'} fontStyle="bold" align="center" width={200} offsetX={100} perfectDrawEnabled={false} />
             {isMissing && <Text y={-baseRadius - (15/currentScale)} text="?" fontSize={14/currentScale} fill="red" fontStyle="bold" align="center" offsetX={4} />}
           </Group>
         );
@@ -281,8 +175,6 @@ const Nodes = React.memo(({
   );
 });
 
-
-// --- Main Component: FloorPlanEditor ---
 export const FloorPlanEditor = () => {
   const { buildings, activeBuildingId, activeFloorId, setActiveView, getActiveFloor, updateNodePosition, updateNodeDescription, removeNodeFromFloor, nodeScale, setNodeScale, baseFontSize, setBaseFontSize, viewState, setViewState } = useSiteStore();
   const { unassignedDevices, clearDeviceSelection } = useTopologyStore();
@@ -298,17 +190,69 @@ export const FloorPlanEditor = () => {
   const debouncedSetView = useDebounceCallback((x: number, y: number, scale: number) => { setViewState(x, y, scale); }, DEBOUNCE_MS);
   const { x: stageX, y: stageY, scale: stageScale } = viewState;
 
-  // FIX: Initialization Effect (One-time Sync)
+  // NEW: Focus Animation Listener
+  useEffect(() => {
+      const handleFocusEvent = (e: any) => {
+          const stage = stageRef.current;
+          if (!stage) return;
+
+          const targetNodeX = e.detail.x;
+          const targetNodeY = e.detail.y;
+          const targetScale = 1.5;
+          const duration = 800;
+          
+          const stageWidth = stage.width();
+          const stageHeight = stage.height();
+          
+          // Calculate center
+          const targetStageX = (stageWidth / 2) - (targetNodeX * targetScale);
+          const targetStageY = (stageHeight / 2) - (targetNodeY * targetScale);
+
+          const startScale = stage.scaleX();
+          const startX = stage.x();
+          const startY = stage.y();
+          
+          const startTime = performance.now();
+
+          const animate = (time: number) => {
+              const elapsed = time - startTime;
+              const progress = Math.min(elapsed / duration, 1);
+              const ease = 1 - Math.pow(1 - progress, 3); // Cubic Ease Out
+
+              const newScale = startScale + (targetScale - startScale) * ease;
+              const newX = startX + (targetStageX - startX) * ease;
+              const newY = startY + (targetStageY - startY) * ease;
+
+              stage.scale({ x: newScale, y: newScale });
+              stage.position({ x: newX, y: newY });
+              stage.batchDraw();
+
+              if (progress < 1) {
+                  requestAnimationFrame(animate);
+              } else {
+                  setViewState(newX, newY, newScale);
+              }
+          };
+
+          requestAnimationFrame(animate);
+      };
+
+      window.addEventListener('FOCUS_NODE', handleFocusEvent);
+      return () => window.removeEventListener('FOCUS_NODE', handleFocusEvent);
+  }, [setViewState]);
+
   useEffect(() => {
       if (stageRef.current) {
-          // Manually applying state to stage ONLY when floor changes
-          const { x, y, scale } = useSiteStore.getState().viewState;
-          stageRef.current.position({ x, y });
-          stageRef.current.scale({ x: scale, y: scale });
-          stageRef.current.batchDraw();
+          const s = stageRef.current;
+          if (Math.abs(s.x() - viewState.x) > 1 || Math.abs(s.scaleX() - viewState.scale) > 0.01) {
+              s.position({ x: viewState.x, y: viewState.y });
+              s.scale({ x: viewState.scale, y: viewState.scale });
+              s.batchDraw();
+          }
       }
-  }, [activeFloor?.id]); 
+  }, [viewState.x, viewState.y, viewState.scale, activeFloor?.id]);
 
+  // Handlers (Wheel, Drop, etc. - maintained)
   const handleWheel = (e: any) => {
     e.evt.preventDefault();
     const stage = stageRef.current;
@@ -336,12 +280,9 @@ export const FloorPlanEditor = () => {
     stageRef.current.setPointersPositions(e);
     const pointer = stageRef.current.getPointerPosition();
     if (!pointer) return;
-    
-    // Read from Stage directly
     const stage = stageRef.current;
     const canvasX = (pointer.x - stage.x()) / stage.scaleX();
     const canvasY = (pointer.y - stage.y()) / stage.scaleY();
-
     const cols = 5;
     const spacing = 50 * nodeScale;
     ids.forEach((id, index) => {
@@ -380,9 +321,6 @@ export const FloorPlanEditor = () => {
   };
 
   const handleMouseUp = (e: any) => {
-    // Global Drag Reset
-    if (isDraggingNode) setIsDraggingNode(false);
-
     if (!isDeleteMode || !selectionBox?.visible) return;
     const x1 = Math.min(selectionBox.startX, selectionBox.endX);
     const x2 = Math.max(selectionBox.startX, selectionBox.endX);
@@ -401,19 +339,11 @@ export const FloorPlanEditor = () => {
           const desc = prompt("Enter device description (Alias):", contextMenu.currentDesc || "");
           if (desc !== null) {
               const isUnique = useSiteStore.getState().checkDescriptionUnique(desc, contextMenu.nodeId);
-              if (!isUnique) {
-                  alert(`Alias "${desc}" is already in use. Please choose a unique name.`);
-                  return;
-              }
+              if (!isUnique) { alert(`Alias "${desc}" is already in use.`); return; }
               updateNodeDescription(activeFloor.id, contextMenu.nodeId, desc);
           }
           setContextMenu({ ...contextMenu, visible: false });
       }
-  };
-
-  // Handle global leave
-  const handleGlobalEnd = () => {
-      if (isDraggingNode) setIsDraggingNode(false);
   };
 
   return (
@@ -427,29 +357,13 @@ export const FloorPlanEditor = () => {
         <div className="flex items-center gap-4 text-xs text-gray-500">
             <div className="flex items-center gap-2"><span>Scale</span><input type="range" min="0.5" max="3" step="0.1" value={nodeScale} onChange={(e) => setNodeScale(parseFloat(e.target.value))} className="w-24 accent-indigo-600 cursor-pointer"/></div>
             <div className="flex items-center gap-2"><Type size={14} /><span>Font</span><input type="range" min="8" max="48" step="1" value={baseFontSize} onChange={(e) => setBaseFontSize(parseInt(e.target.value))} className="w-24 accent-indigo-600 cursor-pointer"/></div>
-            <div className="flex items-center gap-1 bg-gray-100 px-2 py-1 rounded"><ZoomIn size={14}/> <span>{(stageScale * 100).toFixed(0)}%</span></div>
         </div>
       </div>
 
       <div className={`flex-1 overflow-hidden relative bg-gray-50 ${isDeleteMode ? 'cursor-not-allowed' : ''}`} onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}>
         {!activeFloor ? <div className="flex items-center justify-center h-full text-gray-400 text-sm">Select a floor to start editing</div> : (
           <>
-            <Stage 
-                width={window.innerWidth - 350} 
-                height={window.innerHeight - 50} 
-                draggable={!isDraggingNode && !isDeleteMode} 
-                onWheel={handleWheel} 
-                onMouseDown={handleMouseDown} 
-                onMouseMove={handleMouseMove} 
-                onMouseUp={handleMouseUp} 
-                onMouseLeave={handleGlobalEnd}
-                // FIX: Uncontrolled Props - Only initialized via ref, updated via Store action onDragEnd
-                onDragEnd={(e) => { 
-                    if (!isDraggingNode && !isDeleteMode) setViewState(e.target.x(), e.target.y(), e.target.scaleX()); 
-                }} 
-                ref={stageRef} 
-                perfectDrawEnabled={false}
-            >
+            <Stage width={window.innerWidth - 350} height={window.innerHeight - 50} draggable={!isDraggingNode && !isDeleteMode} onWheel={handleWheel} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} x={viewState.x} y={viewState.y} scaleX={viewState.scale} scaleY={viewState.scale} onDragEnd={(e) => { if (!isDraggingNode && !isDeleteMode) setViewState(e.target.x(), e.target.y(), e.target.scaleX()); }} ref={stageRef} perfectDrawEnabled={false}>
                 <Layer ref={layerRef}>
                 {activeFloor.mapId && <FloorImage key={activeFloor.mapId} mapId={activeFloor.mapId} />}
                 <Connections activeFloor={activeFloor} currentScale={stageScale} layerRef={layerRef} />

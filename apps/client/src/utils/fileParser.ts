@@ -3,74 +3,89 @@ export const parseTopologyFile = (content: string, fileName: string): { devices:
   let devices: any[] = [];
   let edges: any[] = [];
 
-  // Helper to clean and parse JSON-like strings
-  const safeParse = (str: string) => {
+  // Helper to safely evaluate JS object strings
+  const safeEval = (str: string) => {
     try {
-        // Replace single quotes with double quotes for JSON compliance if needed, 
-        // but Function constructor is safer for loose JS objects
-        return new Function('return ' + str)();
-    } catch (e) { return null; }
+      // Loose JSON parsing (handles single quotes, unquoted keys)
+      return new Function('return ' + str)();
+    } catch (e) {
+      return null;
+    }
   };
 
-  if (fileName.endsWith('.html') || fileName.endsWith('.txt')) {
-    console.log("Parsing HTML/TXT...");
+  console.log(`Parsing file: ${fileName} (${content.length} bytes)`);
 
-    // STRATEGY 1: Look for "var/const/let nodes/edges = [...]" blocks (Common in Vis.js/ECharts)
-    const arrayBlockRegex = /(?:var|const|let|window.)s*(nodes|edges)s*=s*([[sS]*?]);/g;
-    let match;
-    while ((match = arrayBlockRegex.exec(content)) !== null) {
-        const type = match[1]; // "nodes" or "edges"
-        const arrayStr = match[2];
-        const data = safeParse(arrayStr);
-        if (Array.isArray(data)) {
-            if (type === 'nodes') devices.push(...data);
-            if (type === 'edges') edges.push(...data);
-        }
-    }
-
-    // STRATEGY 2: Look for "dataset.add([...])" patterns
-    const addMethodRegex = /.(?:nodes|edges).add(s*([[sS]*?])s*)/g;
-    while ((match = addMethodRegex.exec(content)) !== null) {
-        const arrayStr = match[1];
-        const data = safeParse(arrayStr);
-        if (Array.isArray(data)) {
-            // Heuristic: check first item keys to decide type
-            if (data.length > 0) {
-                if (data[0].mac || data[0].label) devices.push(...data);
-                else if (data[0].from && data[0].to) edges.push(...data);
-            }
-        }
-    }
-
-    // STRATEGY 3: Fallback - Object Mining (The previous method, kept as backup)
-    if (devices.length === 0 && edges.length === 0) {
-        const objectRegex = /{[sS]*?}/g; // More permissive regex
-        while ((match = objectRegex.exec(content)) !== null) {
-            const snippet = match[0];
-            // Only try parsing if it looks relevant to avoid overhead
-            if (!snippet.includes('mac') && !snippet.includes('from')) continue;
-            
-            const obj = safeParse(snippet);
-            if (obj) {
-                if (obj.mac || (obj.id && obj.label)) devices.push(obj);
-                else if (obj.from !== undefined && obj.to !== undefined) edges.push(obj);
-            }
-        }
-    }
-  } else {
-    // JSON Strategy
-    try {
-      const json = JSON.parse(content);
-      devices = json.devices || json.nodes || [];
-      edges = json.edges || json.links || [];
-    } catch (e) {
-      throw new Error('Invalid JSON format');
+  // STRATEGY 1: Look for Vis.js "nodes.add([...])" or "edges.add([...])"
+  // Regex: matches .add( [ ... ] ) pattern, capturing the array content
+  // We make it case insensitive and flexible with whitespace
+  const addPattern = /.adds*(s*([[sS]*?])s*)/g;
+  
+  let match;
+  while ((match = addPattern.exec(content)) !== null) {
+    const arrayStr = match[1];
+    const data = safeEval(arrayStr);
+    
+    if (Array.isArray(data) && data.length > 0) {
+      // Feature Detection
+      const sample = data[0];
+      
+      // Is it a Device? (Has 'mac' OR 'label' that looks like an ID)
+      if (sample.mac || (sample.id && sample.label)) {
+         console.log(`Found Device Block: ${data.length} items`);
+         devices.push(...data);
+      } 
+      // Is it an Edge? (Has 'from' AND 'to')
+      else if (sample.from !== undefined && sample.to !== undefined) {
+         console.log(`Found Edge Block: ${data.length} items`);
+         edges.push(...data);
+      }
     }
   }
 
-  // Deduplicate based on ID/MAC
-  const uniqueDevices = Array.from(new Map(devices.map(d => [d.mac || d.id, d])).values());
+  // STRATEGY 2: Look for variable assignments "var nodes = [...]"
+  // Often used in raw data dumps
+  const varPattern = /(?:var|const|let|window.)s*(w+)s*=s*([[sS]*?]);/g;
+  while ((match = varPattern.exec(content)) !== null) {
+      const arrayStr = match[2];
+      const data = safeEval(arrayStr);
+      if (Array.isArray(data) && data.length > 0) {
+          const sample = data[0];
+          if (sample.mac) devices.push(...data);
+          else if (sample.from && sample.to) edges.push(...data);
+      }
+  }
+
+  // STRATEGY 3: Fallback - Object Mining (Line by Line)
+  // If bulk arrays failed, try to find individual objects like {id: 1, label: '...'}
+  if (devices.length === 0) {
+      console.log("Bulk parsing failed, trying Object Mining...");
+      const objectRegex = /{[^{}]*?mac[^{}]*?}/g; // Objects with 'mac'
+      while ((match = objectRegex.exec(content)) !== null) {
+          const obj = safeEval(match[0]);
+          if (obj) devices.push(obj);
+      }
+  }
   
-  console.log(`Parsed: ${uniqueDevices.length} devices, ${edges.length} edges`);
-  return { devices: uniqueDevices, edges };
+  if (edges.length === 0) {
+      const edgeRegex = /{[^{}]*?from[^{}]*?to[^{}]*?}/g; // Objects with 'from' and 'to'
+      while ((match = edgeRegex.exec(content)) !== null) {
+          const obj = safeEval(match[0]);
+          if (obj) edges.push(obj);
+      }
+  }
+
+  // Deduplicate Devices (keep last occurrence)
+  const uniqueDevices = Array.from(new Map(devices.map(d => [d.mac || d.id, d])).values());
+
+  // Normalization
+  // Ensure every device has a 'mac' property if it only had 'id'
+  const normalizedDevices = uniqueDevices.map(d => ({
+      ...d,
+      mac: d.mac || String(d.id), // Fallback ID as MAC
+      label: d.label || d.title || String(d.id)
+  }));
+
+  console.log(`Parse Result: ${normalizedDevices.length} devices, ${edges.length} edges`);
+  
+  return { devices: normalizedDevices, edges };
 };

@@ -5,19 +5,20 @@ import { useSiteStore } from '../store/useSiteStore';
 import { buildTopologyTree, filterTopologyNodes, validateMacConflicts } from '../utils/topologyTree';
 import type { TopologyTreeNode, Device } from '../utils/topologyTree';
 import { parseTopologyFile } from '../utils/fileParser';
-import { ChevronRight, ChevronDown, Wifi, Signal, Search, Trash2, X, Plus, Upload, RefreshCw, Check, Play, Circle, Square, CheckSquare, AlertTriangle, PenTool } from 'lucide-react';
+// ADDED: Eye
+import { ChevronRight, ChevronDown, Wifi, Signal, Search, Trash2, X, Plus, Upload, RefreshCw, Check, Play, Circle, Box as BoxIcon, Square, CheckSquare, AlertTriangle, Eye } from 'lucide-react';
 import axios from 'axios';
 
 // --- Tree Node ---
 const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, descriptionMap }: any) => {
-  const { isNodeDeployed } = useSiteStore();
+  const { isNodeDeployed, findNodeLocation, setActiveView } = useSiteStore();
   const [isExpanded, setIsExpanded] = useState(node.forceExpand ?? (node.role === 'LEADER'));
   const isDeployed = isNodeDeployed(node.mac);
   const isSelected = selectedIds.has(node.mac);
   
-  // Resolve Display Name: Description > MAC
-  const customName = descriptionMap[node.mac];
-  const displayName = customName ? customName : node.mac.slice(-4);
+  // Status Flags
+  const isMissing = node.status === 'missing';
+  const isNew = node.isNew && !isDeployed; // Only highlight if not yet placed
 
   React.useEffect(() => {
     if (node.forceExpand) setIsExpanded(true);
@@ -32,23 +33,45 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
   };
 
   const handleDragStart = (e: React.DragEvent) => {
-    if (isDeployed) { e.preventDefault(); return; }
+    if (isDeployed || isMissing) { e.preventDefault(); return; } // Block drag
     const effectivePayload = isSelected ? Array.from(selectedIds) : [node.mac];
     e.dataTransfer.setData('application/json', JSON.stringify({ ids: effectivePayload }));
   };
+
+  const handleFocus = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      const loc = findNodeLocation(node.mac);
+      if (loc) {
+          setActiveView(loc.buildingId, loc.floorId);
+          window.dispatchEvent(new CustomEvent('FOCUS_NODE', { detail: { x: loc.x, y: loc.y } }));
+      }
+  };
+
+  // Resolve Alias
+  const customName = descriptionMap ? descriptionMap[node.mac] : null;
+  const displayName = customName || (node.mac ? node.mac.slice(-4) : node.id);
 
   return (
     <div className="flex flex-col select-none">
       <div 
         className={`flex items-center py-1.5 pr-2 pl-0 rounded-r-md transition-colors group 
             ${isSelected ? 'bg-indigo-50' : 'hover:bg-gray-100'} 
-            ${isDeployed ? 'opacity-50 grayscale cursor-not-allowed' : 'cursor-grab active:cursor-grabbing'}
+            ${(isDeployed || isMissing) ? 'opacity-70 cursor-not-allowed' : 'cursor-grab active:cursor-grabbing'}
+            ${isNew ? 'bg-yellow-50 border-l-2 border-yellow-400' : ''}
         `}
         onClick={(e) => { 
-            e.stopPropagation(); 
-            setIsExpanded(!isExpanded);
+            e.stopPropagation();
+            // Block interaction for missing nodes
+            if (!isMissing) {
+                if (e.ctrlKey || e.metaKey) {
+                    toggleSelect(node);
+                } else {
+                    if (selectedIds.size > 0) clearSelection();
+                    setIsExpanded(!isExpanded);
+                }
+            }
         }}
-        draggable={!isDeployed}
+        draggable={!isDeployed && !isMissing}
         onDragStart={handleDragStart}
       >
         <div className="w-6 flex justify-center shrink-0 text-gray-400 hover:text-gray-600" onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}>
@@ -67,8 +90,10 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
             <span className="text-xs font-mono font-medium text-gray-700 truncate group-hover:text-gray-900">
             {node.role === 'CHILD' ? 'Child' : (node.role === 'LEADER' ? 'Leader' : 'Router')} 
             <span className={`ml-1 ${customName ? 'text-indigo-600 font-bold' : 'text-gray-400'}`}>
-                {displayName}
+                ({displayName})
             </span>
+            {isNew && <span className="ml-2 text-[8px] bg-yellow-400 text-white px-1 rounded font-bold shadow-sm">NEW</span>}
+            {isMissing && <span className="ml-2 text-[8px] bg-red-400 text-white px-1 rounded font-bold shadow-sm">MISSING</span>}
             </span>
         </div>
 
@@ -78,17 +103,19 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
             </span>
         )}
 
-        {!isDeployed && (
-            <div 
-                className="mx-1 text-gray-400 hover:text-indigo-600 cursor-pointer p-1"
-                onClick={(e) => {
-                    e.stopPropagation();
-                    toggleSelect(node);
-                }}
-            >
-                {isSelected ? <CheckSquare size={16} className="text-indigo-600" /> : <Square size={16} />}
-            </div>
-        )}
+        <div className="flex items-center gap-1">
+            {isDeployed ? (
+                <button onClick={handleFocus} className="p-1 text-gray-400 hover:text-indigo-600 rounded-full hover:bg-indigo-50 transition-colors" title="Locate on Map">
+                    <Eye size={14} />
+                </button>
+            ) : (
+                !isMissing && (
+                    <div className="mx-1 text-gray-400 hover:text-indigo-600 cursor-pointer p-1" onClick={(e) => { e.stopPropagation(); toggleSelect(node); }}>
+                        {isSelected ? <CheckSquare size={16} className="text-indigo-600" /> : <Square size={16} />}
+                    </div>
+                )
+            )}
+        </div>
 
         {node.uplinkRssi !== undefined && (
             <div className="ml-1 flex items-center gap-1 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
@@ -106,7 +133,8 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
                 node={child} 
                 selectedIds={selectedIds}
                 toggleSelect={toggleSelect}
-                descriptionMap={descriptionMap} // Pass down
+                clearSelection={clearSelection}
+                descriptionMap={descriptionMap}
              />
           ))}
         </div>
@@ -115,20 +143,17 @@ const TreeNode = ({ node, selectedIds, toggleSelect, clearSelection, description
   );
 };
 
-const LoopItem = ({ loopId, devices, edges, searchQuery, allDevices, onImport, selectedIds, onToggleSelect, onDeleteLoop, descriptionMap }: any) => {
-  const { setImportError, clearMissingNodes } = useTopologyStore();
-  const { isNodeDeployed, removeNodesByDeviceIds } = useSiteStore();
+const LoopItem = ({ loopId, devices, edges, searchQuery, allDevices, onImport, selectedIds, onToggleSelect, onDeleteLoop, onClearSelect, descriptionMap }: any) => {
+  const { setImportError } = useTopologyStore();
+  const { isNodeDeployed } = useSiteStore();
   const [isExpanded, setIsExpanded] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const activeDevices = useMemo(() => devices.filter((d: any) => d.status !== 'missing'), [devices]);
-  const missingDevices = useMemo(() => devices.filter((d: any) => d.status === 'missing'), [devices]);
-
-  const deployedCount = devices.filter((d: any) => isNodeDeployed(d.mac) && d.status !== 'missing').length;
-  const remainingCount = activeDevices.length - deployedCount;
+  const deployedCount = devices.filter((d: any) => isNodeDeployed(d.mac)).length;
+  const remainingCount = devices.length - deployedCount;
 
   const { roots, orphans } = useMemo(() => {
-    const rawTree = buildTopologyTree(activeDevices, edges);
+    const rawTree = buildTopologyTree(devices, edges);
     const sortedRoots = rawTree.roots.sort((a, b) => {
         if (a.role === 'LEADER') return -1;
         if (b.role === 'LEADER') return 1;
@@ -138,7 +163,7 @@ const LoopItem = ({ loopId, devices, edges, searchQuery, allDevices, onImport, s
       roots: filterTopologyNodes(sortedRoots, searchQuery, descriptionMap),
       orphans: filterTopologyNodes(rawTree.orphans, searchQuery, descriptionMap)
     };
-  }, [activeDevices, edges, searchQuery]);
+  }, [devices, edges, searchQuery, descriptionMap]);
 
   const handleMultiDragStart = (e: React.DragEvent) => {
       const ids = Array.from(selectedIds) as string[];
@@ -175,66 +200,41 @@ const LoopItem = ({ loopId, devices, edges, searchQuery, allDevices, onImport, s
       reader.readAsText(file);
   };
 
-  const handleClearMissing = (e: React.MouseEvent) => {
-      e.stopPropagation();
-      if(confirm(`Delete ${missingDevices.length} missing devices?`)) {
-          clearMissingNodes(loopId, (ids) => removeNodesByDeviceIds(ids));
-      }
-  };
-
   return (
     <div className="mb-4 border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm" draggable={selectedIds.size > 0}>
       <div className="flex items-center justify-between px-3 py-2 bg-gray-50 cursor-pointer hover:bg-gray-100" onClick={() => setIsExpanded(!isExpanded)}>
         <div className="flex items-center gap-2">
            {isExpanded ? <ChevronDown size={14} className="text-gray-500" /> : <ChevronRight size={14} className="text-gray-500" />}
            <span className="font-semibold text-xs text-gray-700">LOOP {loopId}</span>
-           <span className="text-[10px] text-gray-400 bg-white px-1.5 rounded border border-gray-200" title="Total Active">
-             {activeDevices.length}
+           <span className="text-[10px] text-gray-400 bg-white px-1.5 rounded border border-gray-200" title="Total Devices">
+             {devices.length}
            </span>
+           
            {remainingCount > 0 && (
                <span className="text-[10px] text-white bg-indigo-500 px-1.5 rounded border border-indigo-600 font-medium">
                  {remainingCount} Left
                </span>
            )}
+           {remainingCount === 0 && devices.length > 0 && (
+               <span className="text-[10px] text-green-600 bg-green-100 px-1.5 rounded font-medium">Done</span>
+           )}
         </div>
         <div className="flex items-center gap-1">
            <button onClick={(e)=>{e.stopPropagation();fileInputRef.current?.click()}} className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"><Upload size={14}/></button>
-           <button onClick={(e)=>{e.stopPropagation(); if(confirm('Delete Loop?')) onDeleteLoop(loopId); }} className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"><Trash2 size={14}/></button>
+           <button onClick={(e)=>{e.stopPropagation(); if(confirm('Delete Loop? Devices on map will be removed.')) onDeleteLoop(loopId); }} className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"><Trash2 size={14}/></button>
            <input ref={fileInputRef} type="file" className="hidden" accept=".json,.html" onChange={handleFileChange} />
         </div>
       </div>
-      
       {isExpanded && (
         <div className="p-2 min-h-[40px]" onDragStart={handleMultiDragStart}>
           <div className="space-y-1">
              {roots.map((root: any) => (
-                 <TreeNode key={root.id} node={root} selectedIds={selectedIds} toggleSelect={onToggleSelect} descriptionMap={descriptionMap} />
+                 <TreeNode key={root.id} node={root} selectedIds={selectedIds} toggleSelect={onToggleSelect} clearSelection={onClearSelect} descriptionMap={descriptionMap} />
              ))}
              {orphans.length > 0 && <div className="mt-2 text-[10px] text-amber-500 font-bold px-1">UNLINKED</div>}
              {orphans.map((orphan: any) => (
-                 <TreeNode key={orphan.id} node={orphan} selectedIds={selectedIds} toggleSelect={onToggleSelect} descriptionMap={descriptionMap} />
+                 <TreeNode key={orphan.id} node={orphan} selectedIds={selectedIds} toggleSelect={onToggleSelect} clearSelection={onClearSelect} descriptionMap={descriptionMap} />
              ))}
-
-             {missingDevices.length > 0 && (
-                 <div className="mt-4 pt-2 border-t border-gray-100 bg-red-50/30 -mx-2 px-2 pb-2">
-                    <div className="flex items-center justify-between mb-2 mt-1">
-                        <div className="flex items-center gap-1 text-[10px] font-bold text-red-400 uppercase">
-                            <AlertTriangle size={10} />
-                            Missing / Offline ({missingDevices.length})
-                        </div>
-                        <button onClick={handleClearMissing} className="text-[10px] text-red-500 hover:text-red-700 hover:bg-red-100 px-1.5 py-0.5 rounded transition-colors">Clear</button>
-                    </div>
-                    <div className="space-y-1 opacity-70">
-                        {missingDevices.map((d: any) => (
-                            <div key={d.mac} className="flex items-center px-1 py-0.5 text-xs text-gray-400 font-mono">
-                                <span className="w-2 h-2 rounded-full bg-gray-300 mr-2"></span>
-                                {d.mac.slice(-4)} 
-                                <span className="ml-2 text-[10px] italic">(Offline)</span>
-                            </div>
-                        ))}
-                    </div>
-                 </div>
-             )}
           </div>
         </div>
       )}
@@ -262,17 +262,12 @@ const AddLoopInput = ({ activeIds, onAdd, onCancel }: any) => {
 
 export const DeviceSidebar = () => {
   const { unassignedDevices, edges, activeLoopIds, addLoop, importLoopData, clearAll, removeLoop, selectedDeviceIds, setBulkSelection, clearDeviceSelection } = useTopologyStore();
-  const { removeNodesByDeviceIds, getAllNodeDescriptions, buildings } = useSiteStore(); // Import Selector
+  const { removeNodesByDeviceIds, getAllNodeDescriptions } = useSiteStore();
+  const descriptionMap = getAllNodeDescriptions(); // Get descriptions
   
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddingLoop, setIsAddingLoop] = useState(false);
-  
   const selectedSet = new Set(selectedDeviceIds);
-  
-  // Subscribe to descriptions directly. 
-  // Note: For large apps, we might use a selector with equality check, but here simple fetch is okay.
-  // We need this to update when SiteStore updates (e.g. description changed in editor).
-  const descriptionMap = getAllNodeDescriptions();
 
   const toggleSelect = (node: any) => {
       const idsToToggle = [node.mac];
@@ -282,10 +277,6 @@ export const DeviceSidebar = () => {
       const isCurrentlySelected = selectedSet.has(node.mac);
       const targetState = !isCurrentlySelected;
       setBulkSelection(idsToToggle, targetState);
-  };
-
-  const clearSelection = () => {
-      setSelectedIds(new Set());
   };
 
   const handleDeleteLoop = (loopId: number) => {
@@ -335,8 +326,9 @@ export const DeviceSidebar = () => {
                 onImport={handleImportLoop} 
                 selectedIds={selectedSet}
                 onToggleSelect={toggleSelect}
+                onClearSelect={clearDeviceSelection}
                 onDeleteLoop={handleDeleteLoop}
-                descriptionMap={descriptionMap} // Pass down map
+                descriptionMap={descriptionMap}
              />
         ))}
       </div>

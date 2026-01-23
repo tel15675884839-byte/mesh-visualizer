@@ -23,7 +23,7 @@ interface SiteStore {
   activeBuildingId: string | null;
   activeFloorId: string | null;
   nodeScale: number;
-  baseFontSize: number; // NEW: Font Size State
+  baseFontSize: number;
   viewState: { x: number; y: number; scale: number };
 
   addBuilding: (name?: string) => void;
@@ -39,14 +39,17 @@ interface SiteStore {
   removeNodesByDeviceIds: (nodeIds: string[]) => void;
   
   isNodeDeployed: (nodeId: string) => boolean;
+  
+  // NEW: Find Node Location Helper
+  findNodeLocation: (nodeId: string) => { buildingId: string, floorId: string, x: number, y: number } | null;
+  checkDescriptionUnique: (description: string, excludeNodeId?: string) => boolean;
+  getAllNodeDescriptions: () => Record<string, string>;
+
   setActiveView: (buildingId: string | null, floorId: string | null) => void;
   setNodeScale: (scale: number) => void;
-  setBaseFontSize: (size: number) => void; // NEW Action
+  setBaseFontSize: (size: number) => void;
   setViewState: (x: number, y: number, scale: number) => void;
   getActiveFloor: () => Floor | undefined;
-  findNodeDescription: (nodeId: string) => string | undefined;
-  getAllNodeDescriptions: () => Record<string, string>;
-  checkDescriptionUnique: (description: string, excludeNodeId?: string) => boolean;
   
   reset: () => void;
   loadState: (state: any) => void;
@@ -59,7 +62,7 @@ export const useSiteStore = create<SiteStore>()(
       activeBuildingId: null,
       activeFloorId: null,
       nodeScale: 1.0,
-      baseFontSize: 14, // Default 14px
+      baseFontSize: 14,
       viewState: { x: 0, y: 0, scale: 1 },
 
       addBuilding: (name) => set((state) => {
@@ -146,26 +149,19 @@ export const useSiteStore = create<SiteStore>()(
       }),
 
       isNodeDeployed: (nid) => get().buildings.some(b => b.floors.some(f => f.nodes.some(n => n.id === nid))),
-      setActiveView: (bid, fid) => set({ activeBuildingId: bid, activeFloorId: fid, viewState: { x: 0, y: 0, scale: 1 } }),
-      setNodeScale: (sc) => set({ nodeScale: sc }),
-      setBaseFontSize: (sz) => set({ baseFontSize: sz }), // Setter
-      setViewState: (x, y, scale) => set({ viewState: { x, y, scale } }),
-      getActiveFloor: () => {
-        const s = get();
-        if(!s.activeBuildingId || !s.activeFloorId) return undefined;
-        return s.buildings.find(b => b.id === s.activeBuildingId)?.floors.find(f => f.id === s.activeFloorId);
-      },
-      getAllNodeDescriptions: () => {
-          const map: Record<string, string> = {};
+      
+      // NEW: Find Node
+      findNodeLocation: (nodeId) => {
           const { buildings } = get();
-          buildings.forEach(b => {
-              b.floors.forEach(f => {
-                  f.nodes.forEach(n => {
-                      if (n.description) map[n.id] = n.description;
-                  });
-              });
-          });
-          return map;
+          for (const b of buildings) {
+              for (const f of b.floors) {
+                  const node = f.nodes.find(n => n.id === nodeId);
+                  if (node) {
+                      return { buildingId: b.id, floorId: f.id, x: node.x, y: node.y };
+                  }
+              }
+          }
+          return null;
       },
 
       checkDescriptionUnique: (description, excludeNodeId) => {
@@ -182,17 +178,29 @@ export const useSiteStore = create<SiteStore>()(
           }
           return true;
       },
-      findNodeDescription: (nodeId) => {
-        const { buildings } = get();
-        for (const b of buildings) {
-          for (const f of b.floors) {
-            const node = f.nodes.find((n) => n.id === nodeId);
-            if (node && node.description) return node.description;
-          }
-        }
-        return undefined;
+
+      getAllNodeDescriptions: () => {
+          const map: Record<string, string> = {};
+          const { buildings } = get();
+          buildings.forEach(b => {
+              b.floors.forEach(f => {
+                  f.nodes.forEach(n => {
+                      if (n.description) map[n.id] = n.description;
+                  });
+              });
+          });
+          return map;
       },
 
+      setActiveView: (bid, fid) => set({ activeBuildingId: bid, activeFloorId: fid, viewState: { x: 0, y: 0, scale: 1 } }),
+      setNodeScale: (sc) => set({ nodeScale: sc }),
+      setBaseFontSize: (sz) => set({ baseFontSize: sz }),
+      setViewState: (x, y, scale) => set({ viewState: { x, y, scale } }),
+      getActiveFloor: () => {
+        const s = get();
+        if(!s.activeBuildingId || !s.activeFloorId) return undefined;
+        return s.buildings.find(b => b.id === s.activeBuildingId)?.floors.find(f => f.id === s.activeFloorId);
+      },
       reset: () => set({ buildings: [], activeBuildingId: null, activeFloorId: null, nodeScale: 1.0, baseFontSize: 14, viewState: { x:0, y:0, scale:1 } }),
       loadState: (state) => set({ 
         buildings: state.buildings || [], 
@@ -211,7 +219,7 @@ export const useSiteStore = create<SiteStore>()(
           activeBuildingId: state.activeBuildingId, 
           activeFloorId: state.activeFloorId, 
           nodeScale: state.nodeScale, 
-          baseFontSize: state.baseFontSize, // Persist Font Size
+          baseFontSize: state.baseFontSize,
           viewState: state.viewState 
       }),
     }

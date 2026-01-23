@@ -1,3 +1,4 @@
+import { useSiteStore } from './useSiteStore';
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
@@ -61,61 +62,54 @@ export const useTopologyStore = create<TopologyStore>()(
         return { activeLoopIds: [...state.activeLoopIds, id].sort((a, b) => a - b) };
       }),
 
-      removeLoop: (loopId) => set((state) => ({
-        activeLoopIds: state.activeLoopIds.filter(id => id !== loopId),
-        unassignedDevices: state.unassignedDevices.filter(d => d.loopId !== loopId),
-        edges: state.edges.filter(e => e.loopId !== loopId),
-      })),
+      removeLoop: (loopId) => {
+        const state = get();
+        // 1. Identify devices to remove
+        const devicesToRemove = state.unassignedDevices.filter(d => d.loopId === loopId);
+        const deviceIds = devicesToRemove.map(d => d.mac);
+
+        // 2. Remove from Site Store (Map)
+        // Access via static method to avoid hook rules in vanilla JS action
+        useSiteStore.getState().removeNodesByDeviceIds(deviceIds);
+
+        // 3. Remove from Topology
+        set((state) => ({
+          activeLoopIds: state.activeLoopIds.filter(id => id !== loopId),
+          unassignedDevices: state.unassignedDevices.filter(d => d.loopId !== loopId),
+          edges: state.edges.filter(e => e.loopId !== loopId),
+        }));
+      },
 
       // DIFF ALGORITHM IMPLEMENTATION
       importLoopData: (loopId, newDevices, newEdges, onRemoveNodes) => set((state) => {
-        // 1. Get current devices for this loop
-        const currentLoopDevices = state.unassignedDevices.filter(d => d.loopId === loopId);
-        const otherDevices = state.unassignedDevices.filter(d => d.loopId !== loopId);
+        const oldLoopDevices = state.unassignedDevices.filter(d => d.loopId === loopId);
+        const otherLoopDevices = state.unassignedDevices.filter(d => d.loopId !== loopId);
         
-        // 2. Build Maps for O(1) lookup
-        const newDeviceMap = new Map(newDevices.map(d => [d.mac, d]));
+        const oldMacs = new Set(oldLoopDevices.map(d => d.mac));
+        const newMacs = new Set(newDevices.map(d => d.mac));
         
-        // 3. Process: Identify Active, Updated, and Missing
-        const processedLoopDevices = [];
-        
-        // A. Handle Existing Devices (Update or Mark Missing)
-        currentLoopDevices.forEach(oldDev => {
-            if (newDeviceMap.has(oldDev.mac)) {
-                // MATCH: Update metadata, set status 'active'
-                const newDev = newDeviceMap.get(oldDev.mac);
-                processedLoopDevices.push({
-                    ...oldDev,
-                    ...newDev, // Overwrite props (e.g. RSSI, Parent)
-                    status: 'active'
-                });
-                newDeviceMap.delete(oldDev.mac); // Mark as processed
-            } else {
-                // MISSING: Keep it, but mark 'missing'
-                processedLoopDevices.push({
-                    ...oldDev,
-                    status: 'missing'
-                });
-            }
-        });
-        
-        // B. Handle New Devices (Remaining in map)
-        newDeviceMap.forEach(newDev => {
-            processedLoopDevices.push({
-                ...newDev,
-                status: 'active',
-                loopId // Ensure ID is set
-            });
-        });
+        // Identify Dropped (Ghost Mode candidates)
+        const droppedMacs = oldLoopDevices.filter(d => !newMacs.has(d.mac)).map(d => d.mac);
+        if (droppedMacs.length > 0 && onRemoveNodes) onRemoveNodes(droppedMacs);
 
-        // 4. Update Edges
-        // We only keep edges for ACTIVE devices. Missing devices lose connectivity.
-        // We replace all old edges for this loop with the new set.
+        // Identify Missing (Keep them, mark as missing)
+        const missingDevices = oldLoopDevices
+            .filter(d => !newMacs.has(d.mac))
+            .map(d => ({ ...d, status: 'missing' }));
+
+        // Process New/Updated Devices
+        const processedNewDevices = newDevices.map(d => ({
+            ...d,
+            loopId,
+            isNew: !oldMacs.has(d.mac), // Tag as new if not in old set
+            status: 'active'
+        }));
+
         const otherEdges = state.edges.filter(e => e.loopId !== loopId);
         const taggedEdges = newEdges.map(e => ({ ...e, loopId }));
 
         return {
-          unassignedDevices: [...otherDevices, ...processedLoopDevices],
+          unassignedDevices: [...otherLoopDevices, ...processedNewDevices, ...missingDevices],
           edges: [...otherEdges, ...taggedEdges],
           importError: null
         };
