@@ -46,6 +46,7 @@ interface SiteStore {
   getActiveFloor: () => Floor | undefined;
   findNodeDescription: (nodeId: string) => string | undefined;
   getAllNodeDescriptions: () => Record<string, string>;
+  checkDescriptionUnique: (description: string, excludeNodeId?: string) => boolean;
   
   reset: () => void;
   loadState: (state: any) => void;
@@ -165,6 +166,21 @@ export const useSiteStore = create<SiteStore>()(
               });
           });
           return map;
+      },
+
+      checkDescriptionUnique: (description, excludeNodeId) => {
+          const { buildings } = get();
+          const lowerDesc = description.toLowerCase();
+          for (const b of buildings) {
+              for (const f of b.floors) {
+                  for (const n of f.nodes) {
+                      if (n.id !== excludeNodeId && n.description?.toLowerCase() === lowerDesc) {
+                          return false;
+                      }
+                  }
+              }
+          }
+          return true;
       },
       findNodeDescription: (nodeId) => {
         const { buildings } = get();

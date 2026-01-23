@@ -135,8 +135,8 @@ const LoopItem = ({ loopId, devices, edges, searchQuery, allDevices, onImport, s
         return a.mac.localeCompare(b.mac);
     });
     return {
-      roots: filterTopologyNodes(sortedRoots, searchQuery),
-      orphans: filterTopologyNodes(rawTree.orphans, searchQuery)
+      roots: filterTopologyNodes(sortedRoots, searchQuery, descriptionMap),
+      orphans: filterTopologyNodes(rawTree.orphans, searchQuery, descriptionMap)
     };
   }, [activeDevices, edges, searchQuery]);
 

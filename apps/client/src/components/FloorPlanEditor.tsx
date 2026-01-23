@@ -399,7 +399,14 @@ export const FloorPlanEditor = () => {
   const handleSetDescription = () => {
       if (contextMenu.nodeId) {
           const desc = prompt("Enter device description (Alias):", contextMenu.currentDesc || "");
-          if (desc !== null) updateNodeDescription(activeFloor.id, contextMenu.nodeId, desc);
+          if (desc !== null) {
+              const isUnique = useSiteStore.getState().checkDescriptionUnique(desc, contextMenu.nodeId);
+              if (!isUnique) {
+                  alert(`Alias "${desc}" is already in use. Please choose a unique name.`);
+                  return;
+              }
+              updateNodeDescription(activeFloor.id, contextMenu.nodeId, desc);
+          }
           setContextMenu({ ...contextMenu, visible: false });
       }
   };

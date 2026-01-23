@@ -217,15 +217,15 @@ export function buildTopologyTree(nodes: (RawNode | Device)[], edges: (RawEdge |
   return { roots: flattenedRoots, orphans };
 }
 
-export function filterTopologyNodes(nodes: TopologyTreeNode[], query: string): TopologyTreeNode[] {
+export function filterTopologyNodes(nodes: TopologyTreeNode[], query: string, descriptionMap?: Record<string, string>): TopologyTreeNode[] {
   if (!query) return nodes;
   const lowerQuery = query.toLowerCase();
   return nodes.reduce((acc: TopologyTreeNode[], node) => {
-    const filteredChildren = filterTopologyNodes(node.children, query);
+    const filteredChildren = filterTopologyNodes(node.children, query, descriptionMap);
     const selfMatches = (
       node.mac.toLowerCase().includes(lowerQuery) || 
       node.role.toLowerCase().includes(lowerQuery) ||
-      (node.raw && 'label' in node.raw && String(node.raw.label).toLowerCase().includes(lowerQuery))
+      (node.raw && 'label' in node.raw && String(node.raw.label).toLowerCase().includes(lowerQuery)) || (descriptionMap && descriptionMap[node.mac] && descriptionMap[node.mac].toLowerCase().includes(lowerQuery))
     );
     if (selfMatches || filteredChildren.length > 0) {
       acc.push({ ...node, children: filteredChildren, forceExpand: filteredChildren.length > 0 }); 
