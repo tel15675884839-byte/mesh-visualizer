@@ -125,7 +125,7 @@ const Connections = React.memo(({ activeFloor, currentScale, layerRef }: { activ
                 name="hit-line"
              />
              <Line points={points} stroke="white" strokeWidth={strokeWidth + 2} opacity={0.8} listening={false} perfectDrawEnabled={false} name="outline-line" />
-             <Line points={points} stroke={edge.color} strokeWidth={strokeWidth} listening={false} perfectDrawEnabled={false} name="color-line" dash={[10/currentScale, 5/currentScale]} />
+             <Line points={points} stroke={edge.color} strokeWidth={strokeWidth} listening={false} perfectDrawEnabled={false} name="color-line" dash={[undefined]} />
              
              {tooltip && tooltip.text === edge.rssi && (
                  <Label x={tooltip.x} y={tooltip.y} listening={false}>
