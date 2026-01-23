@@ -83,7 +83,7 @@ const Connections = React.memo(({ activeFloor, currentScale, layerRef }: { activ
   }, [edges, activeFloor.nodes, unassignedDevices]);
 
   const getPos = (id: string) => activeFloor.nodes.find((n: any) => n.id === id) || { x: 0, y: 0 };
-  const strokeWidth = Math.max(0.3, 0.5 / currentScale);
+  const strokeWidth = Math.max(0.5, 1 / currentScale);
 
   return (
     <Group>
