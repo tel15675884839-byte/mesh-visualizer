@@ -103,7 +103,6 @@ const Connections = React.memo(({ activeFloor, currentScale, layerRef }: { activ
 
         return (
           <Group key={edge.id} id={edge.id}>
-             {/* Hit Area */}
              <Line
                 points={points}
                 stroke="transparent"
@@ -169,7 +168,6 @@ const Nodes = React.memo(({
   };
   const getColor = (r: string) => r.includes('leader') ? '#ef4444' : r.includes('router') ? '#3b82f6' : '#22c55e';
 
-  // Imperative Line Update Logic
   const updateConnectedLines = (nodeId: string, x: number, y: number) => {
       const layer = layerRef.current;
       if (!layer) return;
@@ -207,8 +205,6 @@ const Nodes = React.memo(({
         const isMissing = status === 'missing';
         
         const baseRadius = 10 * nodeScale;
-        
-        // Constant Screen-Size Font Logic
         const constantTextScale = (1 / currentScale); 
         
         const labelText = node.description ? node.description : node.id.slice(-4);
@@ -266,8 +262,8 @@ const Nodes = React.memo(({
             <Text 
                 y={baseRadius + (5 / currentScale)} 
                 text={labelText} 
-                fontSize={baseFontSize} // Custom Font Size
-                scaleX={constantTextScale} // Inverse Scale
+                fontSize={baseFontSize}
+                scaleX={constantTextScale}
                 scaleY={constantTextScale}
                 fill={isMissing ? '#6b7280' : '#111'}
                 fontStyle="bold" 
@@ -296,11 +292,21 @@ export const FloorPlanEditor = () => {
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [selectionBox, setSelectionBox] = useState<{ startX: number, startY: number, endX: number, endY: number, visible: boolean } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ visible: boolean, x: number, y: number, nodeId: string | null, currentDesc?: string }>({ visible: false, x: 0, y: 0, nodeId: null });
-  // States: isDraggingNode restored for cursor logic, dragOverride removed as we use imperative updates
   const [isDraggingNode, setIsDraggingNode] = useState(false);
 
   const debouncedSetView = useDebounceCallback((x: number, y: number, scale: number) => { setViewState(x, y, scale); }, DEBOUNCE_MS);
   const { x: stageX, y: stageY, scale: stageScale } = viewState;
+
+  // FIX: Initialization Effect (One-time Sync)
+  useEffect(() => {
+      if (stageRef.current) {
+          // Manually applying state to stage ONLY when floor changes
+          const { x, y, scale } = useSiteStore.getState().viewState;
+          stageRef.current.position({ x, y });
+          stageRef.current.scale({ x: scale, y: scale });
+          stageRef.current.batchDraw();
+      }
+  }, [activeFloor?.id]); 
 
   const handleWheel = (e: any) => {
     e.evt.preventDefault();
@@ -329,8 +335,12 @@ export const FloorPlanEditor = () => {
     stageRef.current.setPointersPositions(e);
     const pointer = stageRef.current.getPointerPosition();
     if (!pointer) return;
-    const canvasX = (pointer.x - stageX) / stageScale;
-    const canvasY = (pointer.y - stageY) / stageScale;
+    
+    // Read from Stage directly
+    const stage = stageRef.current;
+    const canvasX = (pointer.x - stage.x()) / stage.scaleX();
+    const canvasY = (pointer.y - stage.y()) / stage.scaleY();
+
     const cols = 5;
     const spacing = 50 * nodeScale;
     ids.forEach((id, index) => {
@@ -369,6 +379,9 @@ export const FloorPlanEditor = () => {
   };
 
   const handleMouseUp = (e: any) => {
+    // Global Drag Reset
+    if (isDraggingNode) setIsDraggingNode(false);
+
     if (!isDeleteMode || !selectionBox?.visible) return;
     const x1 = Math.min(selectionBox.startX, selectionBox.endX);
     const x2 = Math.max(selectionBox.startX, selectionBox.endX);
@@ -390,16 +403,10 @@ export const FloorPlanEditor = () => {
       }
   };
 
-  useEffect(() => {
-      if (stageRef.current) {
-          const s = stageRef.current;
-          if (Math.abs(s.x() - viewState.x) > 1 || Math.abs(s.scaleX() - viewState.scale) > 0.01) {
-              s.position({ x: viewState.x, y: viewState.y });
-              s.scale({ x: viewState.scale, y: viewState.scale });
-              s.batchDraw();
-          }
-      }
-  }, [viewState.x, viewState.y, viewState.scale, activeFloor?.id]);
+  // Handle global leave
+  const handleGlobalEnd = () => {
+      if (isDraggingNode) setIsDraggingNode(false);
+  };
 
   return (
     <div className="flex flex-col h-full bg-gray-100 relative">
@@ -411,16 +418,7 @@ export const FloorPlanEditor = () => {
         <button onClick={() => setIsDeleteMode(!isDeleteMode)} className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${isDeleteMode ? 'bg-red-100 text-red-600 border border-red-200 ring-2 ring-red-500/20' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{isDeleteMode ? <Eraser size={14} /> : <Trash2 size={14} />} {isDeleteMode ? 'Delete Mode ON' : 'Delete'}</button>
         <div className="flex items-center gap-4 text-xs text-gray-500">
             <div className="flex items-center gap-2"><span>Scale</span><input type="range" min="0.5" max="3" step="0.1" value={nodeScale} onChange={(e) => setNodeScale(parseFloat(e.target.value))} className="w-24 accent-indigo-600 cursor-pointer"/></div>
-            <div className="flex items-center gap-2">
-                <Type size={14} />
-                <span>Font</span>
-                <input 
-                    type="range" min="8" max="48" step="1" 
-                    value={baseFontSize} 
-                    onChange={(e) => setBaseFontSize(parseInt(e.target.value))}
-                    className="w-24 accent-indigo-600 cursor-pointer"
-                />
-            </div>
+            <div className="flex items-center gap-2"><Type size={14} /><span>Font</span><input type="range" min="8" max="48" step="1" value={baseFontSize} onChange={(e) => setBaseFontSize(parseInt(e.target.value))} className="w-24 accent-indigo-600 cursor-pointer"/></div>
             <div className="flex items-center gap-1 bg-gray-100 px-2 py-1 rounded"><ZoomIn size={14}/> <span>{(stageScale * 100).toFixed(0)}%</span></div>
         </div>
       </div>
@@ -428,17 +426,31 @@ export const FloorPlanEditor = () => {
       <div className={`flex-1 overflow-hidden relative bg-gray-50 ${isDeleteMode ? 'cursor-not-allowed' : ''}`} onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}>
         {!activeFloor ? <div className="flex items-center justify-center h-full text-gray-400 text-sm">Select a floor to start editing</div> : (
           <>
-            <Stage width={window.innerWidth - 350} height={window.innerHeight - 50} draggable={!isDraggingNode && !isDeleteMode} onWheel={handleWheel} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} x={viewState.x} y={viewState.y} scaleX={viewState.scale} scaleY={viewState.scale} onDragEnd={(e) => { if (!isDraggingNode && !isDeleteMode) setViewState(e.target.x(), e.target.y(), e.target.scaleX()); }} ref={stageRef} perfectDrawEnabled={false}>
+            <Stage 
+                width={window.innerWidth - 350} 
+                height={window.innerHeight - 50} 
+                draggable={!isDraggingNode && !isDeleteMode} 
+                onWheel={handleWheel} 
+                onMouseDown={handleMouseDown} 
+                onMouseMove={handleMouseMove} 
+                onMouseUp={handleMouseUp} 
+                onMouseLeave={handleGlobalEnd}
+                // FIX: Uncontrolled Props - Only initialized via ref, updated via Store action onDragEnd
+                onDragEnd={(e) => { 
+                    if (!isDraggingNode && !isDeleteMode) setViewState(e.target.x(), e.target.y(), e.target.scaleX()); 
+                }} 
+                ref={stageRef} 
+                perfectDrawEnabled={false}
+            >
                 <Layer ref={layerRef}>
                 {activeFloor.mapId && <FloorImage key={activeFloor.mapId} mapId={activeFloor.mapId} />}
-                {/* REMOVED: dragOverride prop (dead code) */}
                 <Connections activeFloor={activeFloor} currentScale={stageScale} layerRef={layerRef} />
                 <Nodes 
                     activeFloor={activeFloor} 
                     updatePosition={updateNodePosition} 
                     nodeScale={nodeScale} 
                     currentScale={stageScale} 
-                    baseFontSize={baseFontSize}
+                    baseFontSize={baseFontSize} 
                     unassignedDevices={unassignedDevices} 
                     layerRef={layerRef} 
                     isDeleteMode={isDeleteMode} 
