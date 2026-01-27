@@ -23,6 +23,7 @@ interface SiteStore {
   buildings: Building[];
   activeBuildingId: string | null;
   activeFloorId: string | null;
+  isProjectOpen: boolean; // Project Lifecycle State
   nodeScale: number;
   baseFontSize: number;
   viewState: { x: number; y: number; scale: number };
@@ -54,6 +55,8 @@ interface SiteStore {
   getActiveFloor: () => Floor | undefined;
   
   reset: () => void;
+  createProject: () => void;
+  closeProject: () => void;
   loadState: (state: any) => void;
 }
 
@@ -63,6 +66,7 @@ export const useSiteStore = create<SiteStore>()(
       buildings: [],
       activeBuildingId: null,
       activeFloorId: null,
+      isProjectOpen: false,
       nodeScale: 1.0,
       baseFontSize: 14,
       viewState: { x: 0, y: 0, scale: 1 },
@@ -215,13 +219,26 @@ export const useSiteStore = create<SiteStore>()(
         return s.buildings.find(b => b.id === s.activeBuildingId)?.floors.find(f => f.id === s.activeFloorId);
       },
       reset: () => set({ buildings: [], activeBuildingId: null, activeFloorId: null, nodeScale: 1.0, baseFontSize: 14, viewState: { x:0, y:0, scale:1 } }),
+
+      createProject: () => set({ 
+          buildings: [], 
+          activeBuildingId: null, 
+          activeFloorId: null, 
+          isProjectOpen: true, // OPEN
+          viewState: { x: 0, y: 0, scale: 1 } 
+      }),
+      
+      closeProject: () => set({ isProjectOpen: false }),
+        
       loadState: (state) => set({ 
+        isProjectOpen: true, // FORCE OPEN
         buildings: state.buildings || [], 
         activeBuildingId: state.activeBuildingId || null, 
         activeFloorId: state.activeFloorId || null,
         nodeScale: state.nodeScale || 1.0,
         baseFontSize: state.baseFontSize || 14,
         viewState: state.viewState || { x: 0, y: 0, scale: 1 }
+      
       }),
     }),
     {
@@ -234,7 +251,7 @@ export const useSiteStore = create<SiteStore>()(
           nodeScale: state.nodeScale, 
           baseFontSize: state.baseFontSize,
           viewState: state.viewState 
-      }),
+      , isProjectOpen: state.isProjectOpen }),
     }
   )
 );

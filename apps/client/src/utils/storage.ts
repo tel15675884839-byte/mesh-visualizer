@@ -91,6 +91,10 @@ export const exportProject = async (topologyState: any, siteState: any): Promise
 export const importProject = async (jsonString: string) => {
   try {
     const data: ProjectData = JSON.parse(jsonString);
+    // VALIDATION: Ensure it's a valid Mesh Project file
+    if (!data || !data.topology || !data.site) {
+        throw new Error("Invalid file format. Please open a .mesh or .json project file saved by this application.");
+    }
     
     // 1. Restore Images
     if (data.images) {
