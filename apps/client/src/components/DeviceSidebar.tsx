@@ -379,8 +379,18 @@ export const DeviceSidebar = () => {
   };
 
   const handleDeleteLoop = (loopId: number) => {
-      const devicesToDelete = unassignedDevices.filter(d => d.loopId === loopId).map(d => d.mac);
-      removeNodesByDeviceIds(devicesToDelete);
+      // 1. Get ALL devices associated with this loop (Active + Missing)
+      // Note: unassignedDevices contains everything currently loaded for this loop
+      const devicesToDelete = unassignedDevices
+          .filter(d => d.loopId === loopId)
+          .map(d => d.mac);
+          
+      // 2. Wipe them from the Map (SiteStore)
+      if (devicesToDelete.length > 0) {
+          removeNodesByDeviceIds(devicesToDelete);
+      }
+      
+      // 3. Delete the Loop (TopologyStore)
       removeLoop(loopId);
   };
 

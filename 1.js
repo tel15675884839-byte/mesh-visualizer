@@ -1,327 +1,93 @@
 const fs = require('fs');
 const path = require('path');
 
-const clientRoot = path.join(__dirname, 'apps', 'client');
-const srcPath = path.join(clientRoot, 'src');
-const uiPath = path.join(srcPath, 'components', 'ui');
-const componentsPath = path.join(srcPath, 'components');
+const clientPath = path.join(__dirname, 'apps', 'client', 'src');
+const componentsPath = path.join(clientPath, 'components');
 
-// Ensure UI directory exists
-if (!fs.existsSync(uiPath)) fs.mkdirSync(uiPath, { recursive: true });
+console.log('🎨 Applying V25: Cascade Delete & Empty State Image...');
 
-console.log('☀️ Applying Light-Only Desktop UI (No Status Bar)...');
+// --- 1. UPDATE DeviceSidebar.tsx (Aggressive Delete) ---
+try {
+    const sidebarPath = path.join(componentsPath, 'DeviceSidebar.tsx');
+    let sidebarCode = fs.readFileSync(sidebarPath, 'utf8');
 
-// 1. tailwind.config.js (Light Mode Only)
-const tailwindConfig = `
-/** @type {import('tailwindcss').Config} */
-module.exports = {
-  // darkMode removed - strictly light
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
-  theme: {
-    extend: {
-      colors: {
-        // Semantic names mapped to Light colors directly
-        window: '#f3f4f6', // gray-100 (App Background)
-        panel: '#ffffff',  // white (Sidebar/Modals)
-        border: '#e5e7eb', // gray-200
-        active: '#eff6ff', // blue-50 (Selection)
-      },
-      fontSize: {
-        'xxs': '0.65rem',
-      },
-      boxShadow: {
-        'window': '0 10px 40px -10px rgba(0, 0, 0, 0.2)', // Softer shadow for light mode
-        'panel': '1px 0 0 0 #e5e7eb',
+    // Replace handleDeleteLoop with aggressive cleanup logic
+    // We explicitly look for devices in this loop (active AND missing) and wipe them from the map.
+    const oldDeleteHandlerRegex = /const handleDeleteLoop = \(loopId: number\) => \{[\s\S]*?\};/;
+    
+    const newDeleteHandler = `const handleDeleteLoop = (loopId: number) => {
+      // 1. Get ALL devices associated with this loop (Active + Missing)
+      // Note: unassignedDevices contains everything currently loaded for this loop
+      const devicesToDelete = unassignedDevices
+          .filter(d => d.loopId === loopId)
+          .map(d => d.mac);
+          
+      // 2. Wipe them from the Map (SiteStore)
+      if (devicesToDelete.length > 0) {
+          removeNodesByDeviceIds(devicesToDelete);
       }
-    },
-  },
-  plugins: [],
-}
-`;
-fs.writeFileSync(path.join(clientRoot, 'tailwind.config.js'), tailwindConfig);
-console.log('✅ Updated tailwind.config.js');
-
-// 2. index.css (Global Resets - Clean)
-const indexCss = `
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-/* App Shell: No Scroll, No Bounce */
-html, body, #root {
-  height: 100%;
-  width: 100%;
-  overflow: hidden;
-  overscroll-behavior: none;
-  background-color: #f3f4f6; /* window color */
-}
-
-body {
-  cursor: default;
-  user-select: none;
-  -webkit-user-select: none;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  color: #1f2937; /* gray-800 */
-}
-
-/* Polished Scrollbar */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #d1d5db;
-  border-radius: 4px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
-}
-`;
-fs.writeFileSync(path.join(srcPath, 'index.css'), indexCss);
-console.log('✅ Updated index.css');
-
-// 3. components/ui/WindowModal.tsx (Light Mode Only)
-const windowModalContent = `
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Minus, Maximize2 } from 'lucide-react';
-
-interface WindowModalProps {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-  initialWidth?: number;
-  initialHeight?: number;
-  icon?: React.ReactNode;
-  className?: string;
-}
-
-export const WindowModal: React.FC<WindowModalProps> = ({ 
-  title, 
-  onClose, 
-  children,
-  initialWidth = 960,
-  initialHeight = 600,
-  icon,
-  className = ''
-}) => {
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStartRef = useRef<{ x: number, y: number } | null>(null);
-  
-  // Center on mount
-  useEffect(() => {
-    setPosition({
-        x: Math.max(0, (window.innerWidth - initialWidth) / 2),
-        y: Math.max(0, (window.innerHeight - initialHeight) / 2)
-    });
-  }, []);
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return; 
-    setIsDragging(true);
-    dragStartRef.current = {
-      x: e.clientX - position.x,
-      y: e.clientY - position.y
-    };
-  };
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging || !dragStartRef.current) return;
-      e.preventDefault();
       
-      let newX = e.clientX - dragStartRef.current.x;
-      let newY = e.clientY - dragStartRef.current.y;
-      
-      // Bounds check
-      if (newY < 0) newY = 0;
-      if (newY > window.innerHeight - 30) newY = window.innerHeight - 30;
-      
-      setPosition({ x: newX, y: newY });
-    };
+      // 3. Delete the Loop (TopologyStore)
+      removeLoop(loopId);
+  };`;
 
-    const handleMouseUp = () => {
-      setIsDragging(false);
-      dragStartRef.current = null;
-    };
-
-    if (isDragging) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
+    if (oldDeleteHandlerRegex.test(sidebarCode)) {
+        sidebarCode = sidebarCode.replace(oldDeleteHandlerRegex, newDeleteHandler);
+        fs.writeFileSync(sidebarPath, sidebarCode);
+        console.log('✅ DeviceSidebar.tsx: Cascade delete logic reinforced.');
+    } else {
+        console.warn('⚠️ Could not locate handleDeleteLoop to update.');
     }
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDragging]);
 
-  return (
-    <>
-        {/* Transparent backdrop to catch clicks outside */}
-        <div className="fixed inset-0 bg-black/5 z-40" onClick={onClose} />
-        
-        <div 
-            className={\`fixed z-50 flex flex-col font-sans text-sm select-none 
-                bg-panel border border-gray-300
-                shadow-window rounded-lg overflow-hidden \${className}\`}
-            style={{
-                left: position.x,
-                top: position.y,
-                width: initialWidth,
-                height: initialHeight,
-                boxShadow: '0 20px 50px -12px rgba(0, 0, 0, 0.25)' // Stronger shadow for pop
-            }}
-        >
-            {/* Native-like Title Bar */}
-            <div 
-                className="h-9 flex items-center justify-between px-3 bg-gray-100 border-b border-gray-200 cursor-default select-none"
-                onMouseDown={handleMouseDown}
-            >
-                <div className="flex items-center gap-2 text-gray-700 font-medium">
-                    {icon && <span className="text-gray-500">{icon}</span>}
-                    <span>{title}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                    <button className="p-1 text-gray-400 hover:bg-gray-200 rounded"><Minus size={12} /></button>
-                    <button className="p-1 text-gray-400 hover:bg-gray-200 rounded"><Maximize2 size={10} /></button>
-                    <button 
-                        onClick={onClose}
-                        className="p-1 text-gray-400 hover:bg-red-500 hover:text-white rounded transition-colors ml-1"
-                    >
-                        <X size={14} />
-                    </button>
-                </div>
-            </div>
-
-            {/* Content Area */}
-            <div className="flex-1 overflow-hidden relative flex flex-col bg-white">
-                {children}
-            </div>
-        </div>
-    </>
-  );
-};
-`;
-fs.writeFileSync(path.join(uiPath, 'WindowModal.tsx'), windowModalContent);
-console.log('✅ Created components/ui/WindowModal.tsx');
-
-
-// 4. App.tsx (Refactored Layout)
-const appContent = `
-import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { DeviceSidebar } from './components/DeviceSidebar';
-import { SiteManager } from './components/SiteManager';
-import { FloorPlanEditor } from './components/FloorPlanEditor';
-import { Layers, Map, Save, FolderOpen, Settings } from 'lucide-react';
-import { useSiteStore } from './store/useSiteStore';
-import { useTopologyStore } from './store/useTopologyStore';
-import { exportProject, importProject } from './utils/storage';
-
-function App() {
-  const [sidebarWidth, setSidebarWidth] = useState(280);
-  const [isSiteManagerOpen, setIsSiteManagerOpen] = useState(false);
-  const isDragging = useRef(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // --- Resize Logic ---
-  const startResize = useCallback(() => { isDragging.current = true; document.body.style.cursor = 'col-resize'; }, []);
-  const stopResize = useCallback(() => { isDragging.current = false; document.body.style.cursor = 'default'; }, []);
-  const resize = useCallback((e: MouseEvent) => { if (isDragging.current) setSidebarWidth(Math.max(200, Math.min(600, e.clientX))); }, []);
-  
-  useEffect(() => { 
-      window.addEventListener('mousemove', resize); 
-      window.addEventListener('mouseup', stopResize); 
-      return () => { window.removeEventListener('mousemove', resize); window.removeEventListener('mouseup', stopResize); }; 
-  }, [resize, stopResize]);
-
-  // --- File Handlers ---
-  const handleSave = async () => {
-    const data = await exportProject(useTopologyStore.getState(), useSiteStore.getState());
-    const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = \`mesh-project-\${Date.now()}.mesh\`; a.click(); URL.revokeObjectURL(url);
-  };
-
-  const handleLoad = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if(!file) return;
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-        try {
-            const { topology, site } = await importProject(ev.target?.result as string);
-            useTopologyStore.setState(topology);
-            useSiteStore.getState().loadState(site);
-        } catch(err) { alert("Load Failed"); }
-        if(fileInputRef.current) fileInputRef.current.value = '';
-    };
-    reader.readAsText(file);
-  };
-
-  return (
-    <div className="flex flex-col h-screen w-screen bg-window text-gray-900 overflow-hidden">
-      
-      {/* 1. Top Title Bar */}
-      <div className="h-9 bg-panel border-b border-border flex items-center px-4 justify-between select-none z-50 shrink-0 shadow-sm">
-         <div className="flex items-center gap-4">
-            {/* App Icon */}
-            <div className="flex items-center gap-2 mr-4">
-                <div className="w-5 h-5 bg-blue-600 rounded flex items-center justify-center text-white text-[10px] font-bold shadow-sm">M</div>
-                <span className="font-semibold text-sm text-gray-800 tracking-wide">Mesh Studio</span>
-            </div>
-
-            {/* Menu Buttons */}
-            <div className="flex items-center gap-2">
-                <div className="h-4 w-px bg-gray-300 mx-2"></div>
-                
-                <button onClick={() => fileInputRef.current?.click()} className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-md transition-colors flex items-center gap-2 font-medium">
-                    <FolderOpen size={14}/> Open
-                </button>
-                <input ref={fileInputRef} type="file" accept=".json,.mesh" className="hidden" onChange={handleLoad} />
-                
-                <button onClick={handleSave} className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-md transition-colors flex items-center gap-2 font-medium">
-                    <Save size={14}/> Save
-                </button>
-                
-                <button onClick={() => setIsSiteManagerOpen(true)} className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-md transition-colors flex items-center gap-2 font-medium">
-                    <Settings size={14}/> Site Manager
-                </button>
-            </div>
-         </div>
-      </div>
-
-      {/* 2. Main Workspace */}
-      <div className="flex-1 flex overflow-hidden">
-        
-        {/* Sidebar */}
-        <div style={{ width: sidebarWidth }} className="flex-shrink-0 h-full border-r border-border bg-panel flex flex-col relative z-20">
-            <DeviceSidebar />
-            {/* Drag Handle */}
-            <div onMouseDown={startResize} className="absolute top-0 right-[-3px] w-[6px] h-full cursor-col-resize hover:bg-blue-500/10 z-50 transition-colors"></div>
-        </div>
-
-        {/* Canvas Area (Light Gray) */}
-        <div className="flex-1 h-full bg-[#e5e5e5] relative overflow-hidden flex flex-col">
-            <FloorPlanEditor />
-        </div>
-      </div>
-
-      {/* Modals */}
-      {isSiteManagerOpen && <SiteManager onClose={() => setIsSiteManagerOpen(false)} />}
-    </div>
-  );
+} catch (e) {
+    console.error('❌ Error updating DeviceSidebar.tsx:', e);
 }
 
-export default App;
-`;
-fs.writeFileSync(path.join(srcPath, 'App.tsx'), appContent);
-console.log('✅ Updated App.tsx');
 
-console.log('🚀 Light Theme Desktop UI Applied!');
+// --- 2. UPDATE FloorPlanEditor.tsx (Empty State Image) ---
+try {
+    const editorPath = path.join(componentsPath, 'FloorPlanEditor.tsx');
+    let editorCode = fs.readFileSync(editorPath, 'utf8');
+
+    // Look for the "Select a floor to start editing" div
+    // It usually looks like: {!activeFloor ? <div ...>Select a floor...</div> : (
+    
+    // We will replace the entire inner DIV content
+    const emptyStateRegex = /<div className="flex items-center justify-center h-full text-gray-400 text-sm">Select a floor to start editing<\/div>/;
+    
+    // Replacement: Image + Text
+    // Note: referencing /assets/empty_site.png
+    const newEmptyState = `
+        <div className="flex flex-col items-center justify-center h-full bg-gray-50/50 select-none">
+            <img 
+                src="/assets/empty_site.png" 
+                alt="No Floor Selected" 
+                className="max-w-[300px] opacity-40 mb-4 pointer-events-none grayscale"
+                onError={(e) => {
+                    // Fallback if image not found
+                    e.currentTarget.style.display = 'none';
+                }}
+            />
+            <p className="text-gray-400 font-medium text-sm">Select a floor to start editing</p>
+        </div>
+    `;
+
+    if (emptyStateRegex.test(editorCode)) {
+        editorCode = editorCode.replace(emptyStateRegex, newEmptyState);
+        fs.writeFileSync(editorPath, editorCode);
+        console.log('✅ FloorPlanEditor.tsx: Added Empty State Image.');
+    } else {
+        // Retry with a broader match if specific classes changed
+        const broadRegex = /\{!activeFloor \? <div[\s\S]*?>[\s\S]*?start editing<\/div> : \(/;
+        if (broadRegex.test(editorCode)) {
+            editorCode = editorCode.replace(broadRegex, `{!activeFloor ? ${newEmptyState} : (`);
+            fs.writeFileSync(editorPath, editorCode);
+            console.log('✅ FloorPlanEditor.tsx: Added Empty State Image (Broad Match).');
+        } else {
+            console.warn('⚠️ Could not locate Empty State DIV to replace.');
+        }
+    }
+
+} catch (e) {
+    console.error('❌ Error updating FloorPlanEditor.tsx:', e);
+}
