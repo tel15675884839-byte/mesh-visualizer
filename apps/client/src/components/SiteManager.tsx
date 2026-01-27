@@ -1,3 +1,4 @@
+import { WindowModal } from './ui/WindowModal';
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useSiteStore } from '../store/useSiteStore';
@@ -83,19 +84,13 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm">
-      <div className="bg-white w-[960px] h-[600px] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
-        
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gray-50/50">
-          <div className="flex items-center gap-2">
-            <Map className="text-indigo-600" size={24} />
-            <h2 className="text-lg font-bold text-gray-800">Site Manager</h2>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors">
-            <X size={20} />
-          </button>
-        </div>
-
+    <WindowModal 
+        title="Site Manager" 
+        onClose={onClose} 
+        icon={<Map size={18}/>} 
+        initialWidth={960} 
+        initialHeight={600}
+    >
         <div className="flex flex-1 overflow-hidden">
           
           {/* Column 1: Buildings */}
@@ -231,7 +226,7 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ onClose }) => {
              )}
           </div>
         </div>
-      </div>
-    </div>
+      
+    </WindowModal>
   );
 };

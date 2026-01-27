@@ -4,5 +4,8 @@
   "scripts": {
     "dev:client": "pnpm --filter client dev",
     "dev:server": "pnpm --filter server start:dev"
+  },
+  "dependencies": {
+    "react-draggable": "^4.5.0"
   }
 }
