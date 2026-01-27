@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Minus, Square, Maximize2 } from 'lucide-react';
+import { X, Minus, Maximize2 } from 'lucide-react';
 
 interface WindowModalProps {
   title: string;
@@ -34,7 +34,7 @@ export const WindowModal: React.FC<WindowModalProps> = ({
   }, []);
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return; // Only Left Click
+    if (e.button !== 0) return; 
     setIsDragging(true);
     dragStartRef.current = {
       x: e.clientX - position.x,
@@ -50,7 +50,7 @@ export const WindowModal: React.FC<WindowModalProps> = ({
       let newX = e.clientX - dragStartRef.current.x;
       let newY = e.clientY - dragStartRef.current.y;
       
-      // Simple bounds checking (keep title bar accessible)
+      // Bounds check
       if (newY < 0) newY = 0;
       if (newY > window.innerHeight - 30) newY = window.innerHeight - 30;
       
@@ -74,33 +74,33 @@ export const WindowModal: React.FC<WindowModalProps> = ({
 
   return (
     <>
-        {/* Dimmed Backdrop (Optional, keeps focus on window) */}
-        <div className="fixed inset-0 bg-black/10 dark:bg-black/40 z-40" onClick={onClose} />
+        {/* Transparent backdrop to catch clicks outside */}
+        <div className="fixed inset-0 bg-black/5 z-40" onClick={onClose} />
         
         <div 
             className={`fixed z-50 flex flex-col font-sans text-sm select-none 
-                bg-white dark:bg-zinc-900 
-                border border-gray-300 dark:border-zinc-700 
-                shadow-window rounded-lg overflow-hidden transition-colors duration-200 ${className}`}
+                bg-panel border border-gray-300
+                shadow-window rounded-lg overflow-hidden ${className}`}
             style={{
                 left: position.x,
                 top: position.y,
                 width: initialWidth,
                 height: initialHeight,
+                boxShadow: '0 20px 50px -12px rgba(0, 0, 0, 0.25)' // Stronger shadow for pop
             }}
         >
-            {/* Title Bar */}
+            {/* Native-like Title Bar */}
             <div 
-                className="h-9 flex items-center justify-between px-3 bg-gray-100 dark:bg-zinc-800 border-b border-gray-200 dark:border-zinc-700 cursor-default"
+                className="h-9 flex items-center justify-between px-3 bg-gray-100 border-b border-gray-200 cursor-default select-none"
                 onMouseDown={handleMouseDown}
             >
-                <div className="flex items-center gap-2 text-gray-700 dark:text-gray-200 font-medium">
-                    {icon && <span className="opacity-70">{icon}</span>}
+                <div className="flex items-center gap-2 text-gray-700 font-medium">
+                    {icon && <span className="text-gray-500">{icon}</span>}
                     <span>{title}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                    <button className="p-1 text-gray-400 hover:bg-gray-200 dark:hover:bg-zinc-700 rounded"><Minus size={12} /></button>
-                    <button className="p-1 text-gray-400 hover:bg-gray-200 dark:hover:bg-zinc-700 rounded"><Maximize2 size={10} /></button>
+                    <button className="p-1 text-gray-400 hover:bg-gray-200 rounded"><Minus size={12} /></button>
+                    <button className="p-1 text-gray-400 hover:bg-gray-200 rounded"><Maximize2 size={10} /></button>
                     <button 
                         onClick={onClose}
                         className="p-1 text-gray-400 hover:bg-red-500 hover:text-white rounded transition-colors ml-1"
@@ -110,8 +110,8 @@ export const WindowModal: React.FC<WindowModalProps> = ({
                 </div>
             </div>
 
-            {/* Content */}
-            <div className="flex-1 overflow-hidden relative flex flex-col bg-white dark:bg-zinc-900 text-gray-900 dark:text-gray-100">
+            {/* Content Area */}
+            <div className="flex-1 overflow-hidden relative flex flex-col bg-white">
                 {children}
             </div>
         </div>
