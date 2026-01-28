@@ -23,7 +23,8 @@ interface SiteStore {
   buildings: Building[];
   activeBuildingId: string | null;
   activeFloorId: string | null;
-  isProjectOpen: boolean; // Project Lifecycle State
+  isProjectOpen: boolean;
+  hasUnsavedChanges: boolean; // Project Lifecycle State
   nodeScale: number;
   baseFontSize: number;
   viewState: { x: number; y: number; scale: number };
@@ -57,6 +58,8 @@ interface SiteStore {
   reset: () => void;
   createProject: () => void;
   closeProject: () => void;
+  markDirty: () => void;
+  markSaved: () => void;
   loadState: (state: any) => void;
 }
 
@@ -67,6 +70,7 @@ export const useSiteStore = create<SiteStore>()(
       activeBuildingId: null,
       activeFloorId: null,
       isProjectOpen: false,
+      hasUnsavedChanges: false,
       nodeScale: 1.0,
       baseFontSize: 14,
       viewState: { x: 0, y: 0, scale: 1 },
@@ -100,7 +104,7 @@ export const useSiteStore = create<SiteStore>()(
         return { buildings: newBs, activeFloorId: s.activeFloorId === fid ? null : s.activeFloorId };
       }),
 
-      updateFloor: (bid, fid, data) => set(s => ({
+      updateFloor: (bid, fid, data) => set(s => ({ hasUnsavedChanges: true, 
         buildings: s.buildings.map(b => (b.id !== bid ? b : { ...b, floors: b.floors.map(f => f.id === fid ? { ...f, ...data } : f) }))
       })),
 
@@ -115,7 +119,7 @@ export const useSiteStore = create<SiteStore>()(
         }));
       },
 
-      updateNodePosition: (fid, nid, x, y) => set(s => ({
+      updateNodePosition: (fid, nid, x, y) => set(s => ({ hasUnsavedChanges: true, 
         buildings: s.buildings.map(b => ({ ...b, floors: b.floors.map(f => {
             if(f.id !== fid) return f;
             const idx = f.nodes.findIndex(n => n.id === nid);
@@ -126,7 +130,7 @@ export const useSiteStore = create<SiteStore>()(
         })}))
       })),
 
-      updateNodeDescription: (fid, nid, description) => set(s => ({
+      updateNodeDescription: (fid, nid, description) => set(s => ({ hasUnsavedChanges: true, 
         buildings: s.buildings.map(b => ({ ...b, floors: b.floors.map(f => {
             if(f.id !== fid) return f;
             const idx = f.nodes.findIndex(n => n.id === nid);
@@ -137,7 +141,7 @@ export const useSiteStore = create<SiteStore>()(
         })}))
       })),
 
-      updateNodeCategory: (fid, nid, category) => set(s => ({
+      updateNodeCategory: (fid, nid, category) => set(s => ({ hasUnsavedChanges: true, 
         buildings: s.buildings.map(b => ({ ...b, floors: b.floors.map(f => {
             if(f.id !== fid) return f;
             const idx = f.nodes.findIndex(n => n.id === nid);
@@ -148,7 +152,7 @@ export const useSiteStore = create<SiteStore>()(
         })}))
       })),
 
-      removeNodeFromFloor: (fid, nid) => set(s => ({
+      removeNodeFromFloor: (fid, nid) => set(s => ({ hasUnsavedChanges: true, 
         buildings: s.buildings.map(b => ({ ...b, floors: b.floors.map(f => f.id !== fid ? f : { ...f, nodes: f.nodes.filter(n => n.id !== nid) }) }))
       })),
 
