@@ -1,44 +1,57 @@
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
-const clientPath = path.join(__dirname, 'apps', 'client', 'src');
-const storePath = path.join(clientPath, 'store', 'useSiteStore.ts');
+console.log('🔧 Initializing Git Configuration...');
 
-console.log('🔧 Fixing "Open Project" Logic (Restoring isProjectOpen state)...');
+const projectRoot = path.join(__dirname);
+const gitIgnorePath = path.join(projectRoot, '.gitignore');
 
-try {
-    let storeCode = fs.readFileSync(storePath, 'utf8');
+// 1. 创建标准的 .gitignore 文件 (如果不存在)
+const gitIgnoreContent = `
+# Dependencies
+node_modules
+.pnpm-store
 
-    // We need to modify the loadState action.
-    // Current looking code (likely):
-    // loadState: (state) => set({ 
-    //    buildings: state.buildings || [], 
-    //    ... 
-    // }),
+# Production
+dist
+build
+out
 
-    // We want to inject `isProjectOpen: true,` into the set object.
+# Misc
+.DS_Store
+.env
+.vscode
+.idea
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-    const loadStateRegex = /loadState:\s*\(state\)\s*=>\s*set\(\{\s*([\s\S]*?)\}\),/m;
-    
-    if (loadStateRegex.test(storeCode)) {
-        // Check if it already has isProjectOpen
-        const match = storeCode.match(loadStateRegex);
-        if (match && !match[1].includes('isProjectOpen: true')) {
-            // Inject it at the beginning of the set object
-            const newImplementation = `loadState: (state) => set({ 
-        isProjectOpen: true, // FORCE OPEN
-        ${match[1]}
-      }),`;
-            storeCode = storeCode.replace(loadStateRegex, newImplementation);
-            fs.writeFileSync(storePath, storeCode);
-            console.log('✅ useSiteStore.ts: Fixed loadState to switch view to Workspace.');
-        } else {
-            console.log('ℹ️ useSiteStore.ts seems already correct.');
-        }
-    } else {
-        console.warn('⚠️ Could not locate loadState function signature to patch.');
-    }
+# OS
+Thumbs.db
+`;
 
-} catch (e) {
-    console.error('❌ Error patching useSiteStore.ts:', e);
+if (!fs.existsSync(gitIgnorePath)) {
+    fs.writeFileSync(gitIgnorePath, gitIgnoreContent.trim());
+    console.log('✅ Created .gitignore file (Excluded node_modules/dist).');
+} else {
+    console.log('ℹ️ .gitignore already exists.');
 }
+
+// 2. 初始化 Git 仓库
+try {
+    if (!fs.existsSync(path.join(projectRoot, '.git'))) {
+        execSync('git init', { stdio: 'inherit' });
+        console.log('✅ Git repository initialized.');
+    } else {
+        console.log('ℹ️ Git repository already exists.');
+    }
+} catch (e) {
+    console.error('❌ Failed to run git init. Please install Git first.');
+}
+
+console.log('\n👉 Next Step: Run the following commands in your terminal:');
+console.log('   git add .');
+console.log('   git commit -m "Initial backup"');
