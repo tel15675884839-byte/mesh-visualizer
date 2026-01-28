@@ -129,7 +129,10 @@ const SingleDeviceNode = React.memo(({
     
     const isMissing = status === 'missing';
     const isHighlighted = node.id === highlightedId;
-    const baseRadius = 10 * nodeScale;
+    
+    // Size Logic: Leader/Router are 50% larger
+    const isInfrastructure = role.toLowerCase().includes('leader') || role.toLowerCase().includes('router');
+    const baseRadius = 10 * nodeScale * (isInfrastructure ? 1.5 : 1);
     const constantTextScale = (1 / currentScale);
     const labelText = node.description ? node.description : node.id.slice(-4);
 

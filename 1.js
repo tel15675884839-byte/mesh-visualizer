@@ -1,281 +1,35 @@
 const fs = require('fs');
 const path = require('path');
 
-// --- 1. 定义核心代码内容 ---
-const MESH_MANAGER_CONTENT = `import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
-import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader';
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
+const clientPath = path.join(__dirname, 'apps', 'client', 'src');
+const componentsPath = path.join(clientPath, 'components');
+const editorPath = path.join(componentsPath, 'FloorPlanEditor.tsx');
 
-/**
- * 支持的模型文件类型
- */
-export type ModelFileType = 'gltf' | 'glb' | 'obj';
+console.log('📐 Increasing Leader/Router Icon Size by 50% (Robust Match)...');
 
-/**
- * MeshManager (Singleton)
- * 负责 3D 模型的加载、归一化处理（居中/缩放）以及内存深度销毁。
- */
-export class MeshManager {
-  private static instance: MeshManager | null = null;
-  
-  private gltfLoader: GLTFLoader;
-  private objLoader: OBJLoader;
-  private dracoLoader: DRACOLoader;
+try {
+    let editorCode = fs.readFileSync(editorPath, 'utf8');
 
-  private constructor() {
-    this.gltfLoader = new GLTFLoader();
-    this.objLoader = new OBJLoader();
+    // We need to modify the baseRadius calculation inside SingleDeviceNode.
+    // Target line: const baseRadius = 10 * nodeScale;
     
-    // 初始化 Draco 解码器
-    // 默认使用 CDN，生产环境建议指向本地 /public/draco/ 目录
-    this.dracoLoader = new DRACOLoader();
-    this.dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-    this.dracoLoader.setDecoderConfig({ type: 'js' });
-    this.dracoLoader.preload();
+    // We use a flexible regex that allows for extra spaces
+    const targetRegex = /const\s+baseRadius\s*=\s*10\s*\*\s*nodeScale\s*;?/;
     
-    this.gltfLoader.setDRACOLoader(this.dracoLoader);
-  }
+    const newRadiusCalc = `
+    // Size Logic: Leader/Router are 50% larger
+    const isInfrastructure = role.toLowerCase().includes('leader') || role.toLowerCase().includes('router');
+    const baseRadius = 10 * nodeScale * (isInfrastructure ? 1.5 : 1);`;
 
-  /**
-   * 获取单例实例
-   */
-  public static getInstance(): MeshManager {
-    if (!MeshManager.instance) {
-      MeshManager.instance = new MeshManager();
-    }
-    return MeshManager.instance;
-  }
-
-  /**
-   * 配置 Draco 解码器路径 (例如: '/draco/')
-   */
-  public setDracoDecoderPath(path: string): void {
-    this.dracoLoader.setDecoderPath(path);
-  }
-
-  /**
-   * 异步加载模型
-   * @param url 模型 URL
-   * @param type 模型类型
-   * @returns 加载并封装好的 THREE.Group
-   */
-  public loadModel(url: string, type: ModelFileType): Promise<THREE.Group> {
-    return new Promise((resolve, reject) => {
-      const onSuccess = (data: any) => {
-        let modelObject: THREE.Object3D;
-
-        // 统一提取模型对象
-        if (type === 'gltf' || type === 'glb') {
-          modelObject = data.scene;
-        } else {
-          // OBJ 返回的就是 Group
-          modelObject = data;
-        }
-
-        // 启用阴影
-        modelObject.traverse((node) => {
-          if (node instanceof THREE.Mesh) {
-            node.castShadow = true;
-            node.receiveShadow = true;
-          }
-        });
-
-        // 创建一个包装容器，方便后续整体操作
-        const wrapper = new THREE.Group();
-        wrapper.add(modelObject);
-        
-        resolve(wrapper);
-      };
-
-      const onError = (err: any) => {
-        console.error(\`[MeshManager] Load Error (\${type}): \${url}\`, err);
-        reject(err);
-      };
-
-      try {
-        if (type === 'obj') {
-          this.objLoader.load(url, onSuccess, undefined, onError);
-        } else {
-          this.gltfLoader.load(url, onSuccess, undefined, onError);
-        }
-      } catch (error) {
-        reject(error);
-      }
-    });
-  }
-
-  /**
-   * 模型归一化：自动居中并缩放
-   * @param object 目标对象
-   * @param targetSize 目标归一化尺寸（例如限制在 1 单位大小内）
-   */
-  public normalize(object: THREE.Object3D, targetSize: number = 1.0): void {
-    const box = new THREE.Box3().setFromObject(object);
-    const size = new THREE.Vector3();
-    const center = new THREE.Vector3();
-
-    box.getSize(size);
-    box.getCenter(center);
-
-    // 1. 居中校正
-    // 将对象位置向中心点的反方向移动，使其视觉中心回到 (0,0,0)
-    object.position.x -= center.x;
-    object.position.y -= center.y;
-    object.position.z -= center.z;
-
-    // 2. 自适应缩放
-    const maxDimension = Math.max(size.x, size.y, size.z);
-    if (maxDimension > 0) {
-      const scaleFactor = targetSize / maxDimension;
-      object.scale.multiplyScalar(scaleFactor);
-    }
-
-    // 更新矩阵，确保后续 Raycaster 检测准确
-    object.updateMatrix();
-    object.updateMatrixWorld(true);
-  }
-
-  /**
-   * 深度清理内存（Geometry, Material, Texture）
-   * @param object 需要销毁的对象
-   */
-  public dispose(object: THREE.Object3D): void {
-    if (!object) return;
-
-    object.removeFromParent();
-
-    object.traverse((node) => {
-      if (node instanceof THREE.Mesh) {
-        // 1. 清理 Geometry
-        if (node.geometry) {
-          node.geometry.dispose();
-        }
-
-        // 2. 清理 Material
-        if (node.material) {
-          const materials = Array.isArray(node.material) ? node.material : [node.material];
-          
-          materials.forEach((mat: THREE.Material) => {
-            // 清理 Material 中的所有 Texture
-            this.disposeTexturesInMaterial(mat);
-            // 销毁 Material 自身
-            mat.dispose();
-          });
-        }
-      }
-    });
-  }
-
-  /**
-   * 辅助：遍历并销毁材质中的纹理
-   */
-  private disposeTexturesInMaterial(material: any): void {
-    const textureProperties = [
-      'map', 'alphaMap', 'aoMap', 'bumpMap', 'displacementMap', 
-      'emissiveMap', 'envMap', 'lightMap', 'metalnessMap', 
-      'normalMap', 'roughnessMap'
-    ];
-
-    textureProperties.forEach((prop) => {
-      if (material[prop] && typeof material[prop].dispose === 'function') {
-        material[prop].dispose();
-      }
-    });
-  }
-}
-`;
-
-// --- 2. 辅助函数 ---
-function resolvePath(relativePath) {
-    return path.resolve(process.cwd(), relativePath);
-}
-
-function log(msg, type = 'info') {
-    const symbols = { info: 'ℹ️', success: '✅', error: '❌', warn: '⚠️' };
-    console.log(`${symbols[type] || ''} ${msg}`);
-}
-
-// --- 3. 执行逻辑 ---
-
-// 3.1 检查目录并创建文件
-const managerDir = resolvePath('packages/shared/src/managers');
-const managerFile = path.join(managerDir, 'MeshManager.ts');
-
-try {
-    if (!fs.existsSync(managerDir)) {
-        log(`Creating directory: ${managerDir}`, 'info');
-        fs.mkdirSync(managerDir, { recursive: true });
-    }
-
-    log(`Writing MeshManager.ts to: ${managerFile}`, 'info');
-    fs.writeFileSync(managerFile, MESH_MANAGER_CONTENT, 'utf8');
-    log('MeshManager.ts created successfully.', 'success');
-} catch (e) {
-    log(`Failed to create MeshManager.ts: ${e.message}`, 'error');
-    process.exit(1);
-}
-
-// 3.2 更新 index.ts 导出
-const indexFile = resolvePath('packages/shared/src/index.ts');
-try {
-    if (fs.existsSync(indexFile)) {
-        let indexContent = fs.readFileSync(indexFile, 'utf8');
-        const exportStatement = "export * from './managers/MeshManager';";
-        
-        if (!indexContent.includes('./managers/MeshManager')) {
-            log('Appending export to packages/shared/src/index.ts', 'info');
-            // 确保在新行追加
-            const appendContent = indexContent.endsWith('\n') ? exportStatement : `\n${exportStatement}`;
-            fs.appendFileSync(indexFile, appendContent + '\n');
-            log('Index export updated.', 'success');
-        } else {
-            log('packages/shared/src/index.ts already exports MeshManager.', 'success');
-        }
+    if (targetRegex.test(editorCode)) {
+        editorCode = editorCode.replace(targetRegex, newRadiusCalc);
+        fs.writeFileSync(editorPath, editorCode);
+        console.log('✅ FloorPlanEditor.tsx: Leader & Router icons are now 1.5x larger.');
     } else {
-        log('packages/shared/src/index.ts not found. Creating it.', 'warn');
-        fs.writeFileSync(indexFile, "export * from './managers/MeshManager';\n");
+        console.error('❌ Could not locate "const baseRadius = 10 * nodeScale;" even with flexible matching.');
+        console.log('   Please check if FloorPlanEditor.tsx has been manually modified.');
     }
+
 } catch (e) {
-    log(`Failed to update index.ts: ${e.message}`, 'error');
+    console.error('❌ Error updating FloorPlanEditor.tsx:', e);
 }
-
-// 3.3 更新 package.json 依赖
-const pkgFile = resolvePath('packages/shared/package.json');
-try {
-    if (fs.existsSync(pkgFile)) {
-        const pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8'));
-        let modified = false;
-
-        // 检查 dependencies
-        if (!pkg.dependencies) pkg.dependencies = {};
-        if (!pkg.dependencies['three']) {
-            log('Adding "three" to dependencies in packages/shared/package.json', 'info');
-            pkg.dependencies['three'] = '^0.160.0';
-            modified = true;
-        }
-
-        // 检查 devDependencies
-        if (!pkg.devDependencies) pkg.devDependencies = {};
-        if (!pkg.devDependencies['@types/three']) {
-            log('Adding "@types/three" to devDependencies in packages/shared/package.json', 'info');
-            pkg.devDependencies['@types/three'] = '^0.160.0';
-            modified = true;
-        }
-
-        if (modified) {
-            fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2), 'utf8');
-            log('Updated packages/shared/package.json with Three.js dependencies.', 'success');
-        } else {
-            log('packages/shared/package.json already has Three.js dependencies.', 'success');
-        }
-    } else {
-        log('Error: packages/shared/package.json not found! Cannot inject dependencies.', 'error');
-    }
-} catch (e) {
-    log(`Failed to update package.json: ${e.message}`, 'error');
-}
-
-console.log('\n-----------------------------------------------------------');
-log('Execution Complete. Please run "pnpm install" to install dependencies.', 'info');
-console.log('-----------------------------------------------------------\n');
