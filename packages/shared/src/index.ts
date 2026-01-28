@@ -44,3 +44,4 @@ export interface NetworkTopology {
 
 // 确保文件作为模块被处理
 export const VERSION = '1.0.0';
+export * from './managers/MeshManager';

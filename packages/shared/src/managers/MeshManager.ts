@@ -1,8 +1,4 @@
-const fs = require('fs');
-const path = require('path');
-
-// --- 1. 定义核心代码内容 ---
-const MESH_MANAGER_CONTENT = `import * as THREE from 'three';
+import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
@@ -89,7 +85,7 @@ export class MeshManager {
       };
 
       const onError = (err: any) => {
-        console.error(\`[MeshManager] Load Error (\${type}): \${url}\`, err);
+        console.error(`[MeshManager] Load Error (${type}): ${url}`, err);
         reject(err);
       };
 
@@ -184,98 +180,3 @@ export class MeshManager {
     });
   }
 }
-`;
-
-// --- 2. 辅助函数 ---
-function resolvePath(relativePath) {
-    return path.resolve(process.cwd(), relativePath);
-}
-
-function log(msg, type = 'info') {
-    const symbols = { info: 'ℹ️', success: '✅', error: '❌', warn: '⚠️' };
-    console.log(`${symbols[type] || ''} ${msg}`);
-}
-
-// --- 3. 执行逻辑 ---
-
-// 3.1 检查目录并创建文件
-const managerDir = resolvePath('packages/shared/src/managers');
-const managerFile = path.join(managerDir, 'MeshManager.ts');
-
-try {
-    if (!fs.existsSync(managerDir)) {
-        log(`Creating directory: ${managerDir}`, 'info');
-        fs.mkdirSync(managerDir, { recursive: true });
-    }
-
-    log(`Writing MeshManager.ts to: ${managerFile}`, 'info');
-    fs.writeFileSync(managerFile, MESH_MANAGER_CONTENT, 'utf8');
-    log('MeshManager.ts created successfully.', 'success');
-} catch (e) {
-    log(`Failed to create MeshManager.ts: ${e.message}`, 'error');
-    process.exit(1);
-}
-
-// 3.2 更新 index.ts 导出
-const indexFile = resolvePath('packages/shared/src/index.ts');
-try {
-    if (fs.existsSync(indexFile)) {
-        let indexContent = fs.readFileSync(indexFile, 'utf8');
-        const exportStatement = "export * from './managers/MeshManager';";
-        
-        if (!indexContent.includes('./managers/MeshManager')) {
-            log('Appending export to packages/shared/src/index.ts', 'info');
-            // 确保在新行追加
-            const appendContent = indexContent.endsWith('\n') ? exportStatement : `\n${exportStatement}`;
-            fs.appendFileSync(indexFile, appendContent + '\n');
-            log('Index export updated.', 'success');
-        } else {
-            log('packages/shared/src/index.ts already exports MeshManager.', 'success');
-        }
-    } else {
-        log('packages/shared/src/index.ts not found. Creating it.', 'warn');
-        fs.writeFileSync(indexFile, "export * from './managers/MeshManager';\n");
-    }
-} catch (e) {
-    log(`Failed to update index.ts: ${e.message}`, 'error');
-}
-
-// 3.3 更新 package.json 依赖
-const pkgFile = resolvePath('packages/shared/package.json');
-try {
-    if (fs.existsSync(pkgFile)) {
-        const pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8'));
-        let modified = false;
-
-        // 检查 dependencies
-        if (!pkg.dependencies) pkg.dependencies = {};
-        if (!pkg.dependencies['three']) {
-            log('Adding "three" to dependencies in packages/shared/package.json', 'info');
-            pkg.dependencies['three'] = '^0.160.0';
-            modified = true;
-        }
-
-        // 检查 devDependencies
-        if (!pkg.devDependencies) pkg.devDependencies = {};
-        if (!pkg.devDependencies['@types/three']) {
-            log('Adding "@types/three" to devDependencies in packages/shared/package.json', 'info');
-            pkg.devDependencies['@types/three'] = '^0.160.0';
-            modified = true;
-        }
-
-        if (modified) {
-            fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2), 'utf8');
-            log('Updated packages/shared/package.json with Three.js dependencies.', 'success');
-        } else {
-            log('packages/shared/package.json already has Three.js dependencies.', 'success');
-        }
-    } else {
-        log('Error: packages/shared/package.json not found! Cannot inject dependencies.', 'error');
-    }
-} catch (e) {
-    log(`Failed to update package.json: ${e.message}`, 'error');
-}
-
-console.log('\n-----------------------------------------------------------');
-log('Execution Complete. Please run "pnpm install" to install dependencies.', 'info');
-console.log('-----------------------------------------------------------\n');
