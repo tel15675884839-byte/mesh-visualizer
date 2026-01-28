@@ -54,7 +54,7 @@ interface SiteStore {
   setBaseFontSize: (size: number) => void;
   setViewState: (x: number, y: number, scale: number) => void;
   getActiveFloor: () => Floor | undefined;
-  
+  updateNodeCategories: (floorId: string, nodeIds: string[], category: string) => void;
   reset: () => void;
   createProject: () => void;
   closeProject: () => void;
@@ -151,6 +151,13 @@ export const useSiteStore = create<SiteStore>()(
             return { ...f, nodes: newN };
         })}))
       })),
+      updateNodeCategories: (fid, nids, category) => set(s => ({ hasUnsavedChanges: true, 
+        buildings: s.buildings.map(b => ({ ...b, floors: b.floors.map(f => {
+            if(f.id !== fid) return f;
+            const newN = f.nodes.map(n => nids.includes(n.id) ? { ...n, category } : n);
+            return { ...f, nodes: newN };
+        })}))
+      })), 
 
       removeNodeFromFloor: (fid, nid) => set(s => ({ hasUnsavedChanges: true,  hasUnsavedChanges: true, 
         buildings: s.buildings.map(b => ({ ...b, floors: b.floors.map(f => f.id !== fid ? f : { ...f, nodes: f.nodes.filter(n => n.id !== nid) }) }))

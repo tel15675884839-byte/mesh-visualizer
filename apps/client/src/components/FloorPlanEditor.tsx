@@ -6,7 +6,9 @@ import useImage from 'use-image';
 import { useSiteStore } from '../store/useSiteStore';
 import { useTopologyStore } from '../store/useTopologyStore';
 import { getImage } from '../utils/storage';
-import { Layers, ZoomIn, Trash2, Eraser, X, Pencil, Type } from 'lucide-react';
+import { Layers, ZoomIn, Trash2, Eraser, X, Pencil, Type, Edit } from 'lucide-react';
+import { BatchEditDialog } from './ui/BatchEditDialog';
+import { useMultiSelectStore } from '../store/useMultiSelectStore';
 
 const STAGE_WIDTH_OFFSET = 350;
 const DEBOUNCE_MS = 500;
@@ -105,8 +107,6 @@ const Connections = React.memo(({ activeFloor, currentScale, layerRef }: { activ
   );
 });
 
-// --- Sub-Component: Single Device Node (V23 Fixed) ---
-// --- Sub-Component: Single Device Node (Surgically Fixed) ---
 const SingleDeviceNode = React.memo(({ 
     node, 
     activeFloorId,
@@ -116,10 +116,11 @@ const SingleDeviceNode = React.memo(({
     currentScale, 
     baseFontSize, 
     isDeleteMode,
-    highlightedId,
+    isMultiSelectMode,
+    isSelected,
     layerRef, 
     // Actions
-    onRemove,
+    onNodeClick, // Combined click handler
     onContextMenu,
     onDragStart,
     onDragMove,
@@ -128,20 +129,18 @@ const SingleDeviceNode = React.memo(({
 }: any) => {
     
     const isMissing = status === 'missing';
-    const isHighlighted = node.id === highlightedId;
+    const isHighlighted = isSelected; // Highlight if selected
     
-    // Size Logic: Leader/Router are 50% larger
     const isInfrastructure = role.toLowerCase().includes('leader') || role.toLowerCase().includes('router');
     const baseRadius = 10 * nodeScale * (isInfrastructure ? 1.5 : 1);
     const constantTextScale = (1 / currentScale);
     const labelText = node.description ? node.description : node.id.slice(-4);
 
-    // --- Visual Logic (Separated Fill & Border) ---
     let iconName = null;
     let strokeColor = '#000000'; 
-    let fillColor = '#22c55e';   // Default: Green fill
-    let borderThickness = 1;     
-    let showBorder = false;      // FIXED: Default NO BORDER for everyone (including Child)
+    let fillColor = '#22c55e';
+    let borderThickness = 1;
+    let showBorder = false;
 
     const r = role.toLowerCase();
     
@@ -152,18 +151,15 @@ const SingleDeviceNode = React.memo(({
         iconName = 'Router.svg'; 
         strokeColor = '#3b82f6'; 
     } else {
-        // Child Logic
         if (node.category) {
             iconName = `${node.category}.svg`; 
         }
     }
 
-    // Force border ONLY if special state
     if (isDeleteMode || isHighlighted || isMissing) {
         showBorder = true;
     }
 
-    // Load SVG
     const [image] = useImage(iconName ? `/assets/icons/${iconName}` : '', 'anonymous');
 
     const finalStroke = isDeleteMode ? 'red' : (isHighlighted ? '#06b6d4' : (isMissing ? '#4b5563' : strokeColor));
@@ -203,11 +199,9 @@ const SingleDeviceNode = React.memo(({
             id={`node-${node.id}`}
             x={node.x}
             y={node.y}
-            draggable={!isDeleteMode && !isMissing}
+            draggable={!isDeleteMode && !isMissing && !isMultiSelectMode}
             opacity={isMissing ? 0.6 : 1}
-            onClick={(e) => { 
-                if (isDeleteMode) { e.cancelBubble = true; onRemove(activeFloorId, node.id); } 
-            }}
+            onClick={(e) => onNodeClick(e, node.id)}
             onContextMenu={(e) => { 
                 e.evt.preventDefault(); 
                 e.cancelBubble = true; 
@@ -225,6 +219,7 @@ const SingleDeviceNode = React.memo(({
             onMouseEnter={(e) => { 
                 if (isDeleteMode) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'crosshair'; }
                 else if (isMissing) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'not-allowed'; }
+                else if (isMultiSelectMode) { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'pointer'; }
             }}
             onMouseLeave={(e) => { const c = e.target.getStage()?.container(); if(c) c.style.cursor = 'default'; }}
         >
@@ -286,8 +281,9 @@ const Nodes = React.memo(({
     unassignedDevices,
     layerRef,
     isDeleteMode,
-    highlightedId,
-    onRemove,
+    isMultiSelectMode,
+    selectedNodeIds,
+    onNodeClick,
     onContextMenu,
     onDragStart, 
     onDragEnd 
@@ -315,9 +311,10 @@ const Nodes = React.memo(({
             currentScale={currentScale}
             baseFontSize={baseFontSize}
             isDeleteMode={isDeleteMode}
-            highlightedId={highlightedId}
+            isMultiSelectMode={isMultiSelectMode}
+            isSelected={selectedNodeIds.includes(node.id)}
             layerRef={layerRef}
-            onRemove={onRemove}
+            onNodeClick={onNodeClick}
             onContextMenu={onContextMenu}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd} 
@@ -329,72 +326,60 @@ const Nodes = React.memo(({
 });
 
 export const FloorPlanEditor = () => {
-  const { buildings, activeBuildingId, activeFloorId, setActiveView, getActiveFloor, updateNodePosition, updateNodeDescription, updateNodeCategory, removeNodeFromFloor, nodeScale, setNodeScale, baseFontSize, setBaseFontSize, viewState, setViewState } = useSiteStore();
+  const { buildings, activeBuildingId, activeFloorId, setActiveView, getActiveFloor, updateNodePosition, updateNodeDescription, updateNodeCategory, removeNodeFromFloor, nodeScale, setNodeScale, baseFontSize, setBaseFontSize, viewState, setViewState, updateNodeCategories } = useSiteStore();
   const { unassignedDevices, clearDeviceSelection } = useTopologyStore();
+  const { selectedNodeIds, addSelectedNodeId, removeSelectedNodeId, clearSelectedNodeIds } = useMultiSelectStore();
+
   const activeFloor = getActiveFloor();
   const stageRef = useRef<Konva.Stage>(null);
   const layerRef = useRef<Konva.Layer>(null);
   const dragTargetRef = useRef<string | null>(null);
 
   const [isDeleteMode, setIsDeleteMode] = useState(false);
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
   const [selectionBox, setSelectionBox] = useState<{ startX: number, startY: number, endX: number, endY: number, visible: boolean } | null>(null);
   const [propertyModal, setPropertyModal] = useState<{ visible: boolean, x: number, y: number, nodeId: string | null, currentDesc?: string, currentCategory?: string }>({ visible: false, x: 0, y: 0, nodeId: null });
-  // Removed isDraggingNode state to prevent parent re-renders during drag
-  // We rely on imperative updates and refs now.
+  const [batchEditModalVisible, setBatchEditModalVisible] = useState(false);
 
   const debouncedSetView = useDebounceCallback((x: number, y: number, scale: number) => { setViewState(x, y, scale); }, DEBOUNCE_MS);
-  const { x: stageX, y: stageY, scale: stageScale } = viewState;
+  const { scale: stageScale } = viewState;
 
-  // Global Drag Reset
-  const handleGlobalEnd = () => {
-      dragTargetRef.current = null;
+  useEffect(() => {
+    if (isMultiSelectMode) {
+      setIsDeleteMode(false);
+    } else {
+      clearSelectedNodeIds();
+    }
+  }, [isMultiSelectMode, clearSelectedNodeIds]);
+
+  useEffect(() => {
+    if (isDeleteMode) {
+      setIsMultiSelectMode(false);
+    }
+  }, [isDeleteMode]);
+
+  const handleNodeClick = (e: Konva.KonvaEventObject<MouseEvent>, nodeId: string) => {
+    if (isMultiSelectMode) {
+      e.evt.preventDefault();
+      if (selectedNodeIds.includes(nodeId)) {
+        removeSelectedNodeId(nodeId);
+      } else {
+        addSelectedNodeId(nodeId);
+      }
+    } else if (isDeleteMode) {
+        e.cancelBubble = true; 
+        removeNodeFromFloor(activeFloor.id, nodeId);
+    }
   };
 
-  // Initialization Effect
-  useEffect(() => {
-      if (stageRef.current) {
-          const { x, y, scale } = useSiteStore.getState().viewState;
-          stageRef.current.position({ x, y });
-          stageRef.current.scale({ x: scale, y: scale });
-          stageRef.current.batchDraw();
-      }
-  }, [activeFloor?.id]); 
-
-  // FOCUS NODE Listener
-  useEffect(() => {
-      const handleFocusEvent = (e: any) => {
-          const stage = stageRef.current;
-          if (!stage) return;
-          const targetNodeX = e.detail.x;
-          const targetNodeY = e.detail.y;
-          const targetScale = 1.5;
-          const duration = 800;
-          const stageWidth = stage.width();
-          const stageHeight = stage.height();
-          const targetStageX = (stageWidth / 2) - (targetNodeX * targetScale);
-          const targetStageY = (stageHeight / 2) - (targetNodeY * targetScale);
-          const startScale = stage.scaleX();
-          const startX = stage.x();
-          const startY = stage.y();
-          const startTime = performance.now();
-          const animate = (time: number) => {
-              const elapsed = time - startTime;
-              const progress = Math.min(elapsed / duration, 1);
-              const ease = 1 - Math.pow(1 - progress, 3);
-              const newScale = startScale + (targetScale - startScale) * ease;
-              const newX = startX + (targetStageX - startX) * ease;
-              const newY = startY + (targetStageY - startY) * ease;
-              stage.scale({ x: newScale, y: newScale });
-              stage.position({ x: newX, y: newY });
-              stage.batchDraw();
-              if (progress < 1) requestAnimationFrame(animate);
-              else setViewState(newX, newY, newScale);
-          };
-          requestAnimationFrame(animate);
-      };
-      window.addEventListener('FOCUS_NODE', handleFocusEvent);
-      return () => window.removeEventListener('FOCUS_NODE', handleFocusEvent);
-  }, [setViewState]);
+  const handleBatchEditSave = (newCategory: string) => {
+    if (activeFloorId && selectedNodeIds.length > 0) {
+      updateNodeCategories(activeFloorId, selectedNodeIds, newCategory);
+    }
+    setBatchEditModalVisible(false);
+    clearSelectedNodeIds();
+    setIsMultiSelectMode(false);
+  };
 
   const handleWheel = (e: any) => {
     e.evt.preventDefault();
@@ -437,55 +422,10 @@ export const FloorPlanEditor = () => {
     clearDeviceSelection();
   };
 
-  const handleMouseDown = (e: any) => {
-    // If clicked on Stage, global reset
-    if (e.target === stageRef.current) handleGlobalEnd();
-
-    if (!isDeleteMode) return;
-    const stage = e.target.getStage();
-    const pointer = stage?.getPointerPosition();
-    if (pointer) {
-        const transform = stage.getAbsoluteTransform().copy();
-        transform.invert();
-        const pos = transform.point(pointer);
-        setSelectionBox({ startX: pos.x, startY: pos.y, endX: pos.x, endY: pos.y, visible: true });
-    }
-  };
-
-  const handleMouseMove = (e: any) => {
-    if (!isDeleteMode || !selectionBox?.visible) return;
-    const stage = e.target.getStage();
-    const pointer = stage?.getPointerPosition();
-    if (pointer) {
-        const transform = stage.getAbsoluteTransform().copy();
-        transform.invert();
-        const pos = transform.point(pointer);
-        setSelectionBox({ ...selectionBox, endX: pos.x, endY: pos.y });
-    }
-  };
-
-  const handleMouseUp = (e: any) => {
-    handleGlobalEnd();
-    if (!isDeleteMode || !selectionBox?.visible) return;
-    const x1 = Math.min(selectionBox.startX, selectionBox.endX);
-    const x2 = Math.max(selectionBox.startX, selectionBox.endX);
-    const y1 = Math.min(selectionBox.startY, selectionBox.endY);
-    const y2 = Math.max(selectionBox.startY, selectionBox.endY);
-    const nodesToRemove: string[] = [];
-    activeFloor.nodes.forEach((n: any) => { if (n.x >= x1 && n.x <= x2 && n.y >= y1 && n.y <= y2) nodesToRemove.push(n.id); });
-    if (nodesToRemove.length > 0 && confirm(`Delete ${nodesToRemove.length} items?`)) {
-        nodesToRemove.forEach(id => removeNodeFromFloor(activeFloor.id, id));
-        setIsDeleteMode(false);
-    }
-    setSelectionBox(null);
-  };
-
   const handleContextMenu = (evt: any, nodeId: string, description?: string, category?: string) => setPropertyModal({ visible: true, x: evt.clientX, y: evt.clientY, nodeId, currentDesc: description, currentCategory: category });
 
-  // Callbacks for Nodes to ensure stability (FIX for Sticky Drag)
   const handleDragStartNode = useCallback((id: string) => {
       dragTargetRef.current = id;
-      // Do NOT set state here (causes re-render which breaks drag)
   }, []);
 
   const handleDragEndNode = useCallback(() => {
@@ -499,29 +439,34 @@ export const FloorPlanEditor = () => {
         <div className="h-4 w-px bg-gray-300"></div>
         <div className="flex items-center gap-2"><select className="text-sm font-medium text-gray-700 bg-transparent border-none focus:ring-0 cursor-pointer" value={activeFloorId || ''} onChange={(e) => setActiveView(activeBuildingId, e.target.value)} disabled={!activeBuildingId}>{!activeBuildingId ? <option>--</option> : !buildings.find(b=>b.id===activeBuildingId)?.floors.length ? <option>No Floors</option> : buildings.find(b=>b.id===activeBuildingId)?.floors.slice().reverse().map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select></div>
         <div className="flex-1"></div>
-        <button onClick={() => setIsDeleteMode(!isDeleteMode)} className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${isDeleteMode ? 'bg-red-100 text-red-600 border border-red-200 ring-2 ring-red-500/20' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{isDeleteMode ? <Eraser size={14} /> : <Trash2 size={14} />} {isDeleteMode ? 'Delete Mode ON' : 'Delete'}</button>
+        
+        {selectedNodeIds.length > 1 && (
+            <button onClick={() => setBatchEditModalVisible(true)} className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-all bg-indigo-600 text-white hover:bg-indigo-700`}>
+                <Edit size={14} /> Batch Edit ({selectedNodeIds.length})
+            </button>
+        )}
+
+        <button onClick={() => setIsMultiSelectMode(!isMultiSelectMode)} className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${isMultiSelectMode ? 'bg-blue-100 text-blue-600 border border-blue-200 ring-2 ring-blue-500/20' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+          <Pencil size={14} /> {isMultiSelectMode ? 'Select Mode ON' : 'Select'}
+        </button>
+
+        <button onClick={() => setIsDeleteMode(!isDeleteMode)} className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${isDeleteMode ? 'bg-red-100 text-red-600 border border-red-200 ring-2 ring-red-500/20' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+          {isDeleteMode ? <Eraser size={14} /> : <Trash2 size={14} />} {isDeleteMode ? 'Delete Mode ON' : 'Delete'}
+        </button>
         <div className="flex items-center gap-4 text-xs text-gray-500">
             <div className="flex items-center gap-2"><span>Scale</span><input type="range" min="0.5" max="3" step="0.1" value={nodeScale} onChange={(e) => setNodeScale(parseFloat(e.target.value))} className="w-24 accent-indigo-600 cursor-pointer"/></div>
             <div className="flex items-center gap-2"><Type size={14} /><span>Font</span><input type="range" min="8" max="48" step="1" value={baseFontSize} onChange={(e) => setBaseFontSize(parseInt(e.target.value))} className="w-24 accent-indigo-600 cursor-pointer"/></div>
         </div>
       </div>
 
-      <div className={`flex-1 overflow-hidden relative bg-gray-50 ${isDeleteMode ? 'cursor-not-allowed' : ''}`} onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}>
+      <div className={`flex-1 overflow-hidden relative bg-gray-50 ${isDeleteMode || isMultiSelectMode ? 'cursor-not-allowed' : ''}`} onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}>
         {!activeFloor ? <div className="flex items-center justify-center h-full text-gray-400 text-sm">Select a floor to start editing</div> : (
           <>
             <Stage 
-                width={window.innerWidth - 350} 
+                width={window.innerWidth - STAGE_WIDTH_OFFSET} 
                 height={window.innerHeight - 50} 
-                draggable={!isDeleteMode && !dragTargetRef.current} 
+                draggable={!isDeleteMode && !dragTargetRef.current && !isMultiSelectMode} 
                 onWheel={handleWheel} 
-                onMouseDown={handleMouseDown} 
-                onMouseMove={handleMouseMove} 
-                onMouseUp={handleMouseUp} 
-                onMouseLeave={handleGlobalEnd} 
-                onDragEnd={(e) => { 
-                    // Only update store view state if stage itself was dragged
-                    if (!dragTargetRef.current && !isDeleteMode) setViewState(e.target.x(), e.target.y(), e.target.scaleX()); 
-                }} 
                 ref={stageRef} 
                 perfectDrawEnabled={false}
             >
@@ -537,16 +482,30 @@ export const FloorPlanEditor = () => {
                     unassignedDevices={unassignedDevices} 
                     layerRef={layerRef} 
                     isDeleteMode={isDeleteMode} 
-                    onRemove={(fid: string, nid: string) => { removeNodeFromFloor(fid, nid); setIsDeleteMode(false); }} 
+                    isMultiSelectMode={isMultiSelectMode}
+                    selectedNodeIds={selectedNodeIds}
+                    onNodeClick={handleNodeClick} 
                     onContextMenu={handleContextMenu}
                     onDragStart={handleDragStartNode}
                     onDragEnd={handleDragEndNode}
                 />
-                {selectionBox && selectionBox.visible && <Rect x={Math.min(selectionBox.startX, selectionBox.endX)} y={Math.min(selectionBox.startY, selectionBox.endY)} width={Math.abs(selectionBox.endX - selectionBox.startX)} height={Math.abs(selectionBox.endY - selectionBox.startY)} fill="rgba(255, 0, 0, 0.2)" stroke="red" strokeWidth={1 / viewState.scale} listening={false} />}
                 </Layer>
             </Stage>
             
-            {/* Property Modal */}
+            <BatchEditDialog
+              show={batchEditModalVisible}
+              onClose={() => setBatchEditModalVisible(false)}
+              onSave={handleBatchEditSave}
+              categories={[
+                { value: "", label: "Default (Green Circle)" },
+                { value: "heat-mult", label: "Heat or Mult Detector" },
+                { value: "smoke", label: "Smoke Detector" },
+                { value: "io-module", label: "IO Module" },
+                { value: "mcp", label: "MCP" },
+                { value: "sounder", label: "Sounder" },
+              ]}
+            />
+            
             {propertyModal.visible && (
                 <div className="fixed inset-0 bg-black/20 z-[200] flex items-center justify-center" onClick={() => setPropertyModal({ ...propertyModal, visible: false })}>
                     <div className="bg-white rounded-lg shadow-xl p-6 w-80" onClick={e => e.stopPropagation()}>
