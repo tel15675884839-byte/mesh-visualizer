@@ -13,8 +13,8 @@ class FileServiceImpl {
     // 1. Check if we need to save current work
     if (siteStore.isProjectOpen && siteStore.hasUnsavedChanges) {
       const choice = await useUIStore.getState().confirm({
-        title: 'Unsaved Changes',
-        message: 'The current project has unsaved changes. Do you want to save them before opening a new file?',
+        title: 'Save Changes?',
+        message: 'Do you want to save changes to the current project before opening a new one?',
         type: 'warning'
       });
 
@@ -26,20 +26,16 @@ class FileServiceImpl {
 
       if (choice === 'SAVE') {
         await this.handleSave();
-        // Continue to open...
+        // After save, proceed to open (User gesture chain is tricky here, but we try)
       }
       
       // If 'DISCARD', we just proceed
     }
 
-    // 2. Trigger File Picker (Programmatically click the hidden input passed in)
-    // Note: Since browsers require user gesture for file picker, 
-    // we assume the user ALREADY clicked "Open", and we are intercepting the logic.
-    // However, we can't pause the click event.
-    
-    // REVISED FLOW:
-    // The "Open" button should call this function.
-    // If the check passes, WE trigger the click on the input.
+    // 2. Trigger File Picker
+    // Note: If this was async waited, some browsers might block the popup.
+    // However, since the "Confirm" choice comes from a fresh user click in the modal, 
+    // it usually propagates the user gesture permissions.
     fileInput.click();
   }
 
@@ -63,7 +59,7 @@ class FileServiceImpl {
         
       } catch (err) {
         console.error(err);
-        alert('Failed to load project file.');
+        alert(err instanceof Error ? err.message : 'Failed to load project file.');
       } finally {
         e.target.value = ''; // Reset input
       }
@@ -84,6 +80,35 @@ class FileServiceImpl {
     // Mark as saved
     useSiteStore.getState().markSaved();
   }
+
+  // Unified flow for creating a new project
+  async newProjectFlow(onSuccess: () => void) {
+    const siteStore = useSiteStore.getState();
+
+    // Check for unsaved changes
+    if (siteStore.isProjectOpen && siteStore.hasUnsavedChanges) {
+      const choice = await useUIStore.getState().confirm({
+        title: 'Save Changes?',
+        message: 'Do you want to save changes to the current project before creating a new one?',
+        type: 'warning'
+      });
+
+      if (choice === 'CANCEL') return;
+
+      if (choice === 'SAVE') {
+        await this.handleSave();
+      }
+      // If DISCARD, proceed without saving
+    }
+
+    // Reset Logic
+    siteStore.createProject();
+    useTopologyStore.getState().clearAll();
+    
+    // Trigger Success Callback (e.g. Open Site Manager)
+    onSuccess();
+  }
+
 }
 
 export const FileService = new FileServiceImpl();

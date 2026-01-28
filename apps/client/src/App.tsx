@@ -3,10 +3,11 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { DeviceSidebar } from './components/DeviceSidebar';
 import { SiteManager } from './components/SiteManager';
 import { FloorPlanEditor } from './components/FloorPlanEditor';
+import { ConfirmationDialog } from './components/ui/ConfirmationDialog';
 import { Layers, Map, Save, FolderOpen, Settings, Plus, Monitor, LogOut } from 'lucide-react';
 import { useSiteStore } from './store/useSiteStore';
 import { useTopologyStore } from './store/useTopologyStore';
-import { exportProject, importProject } from './utils/storage';
+import { FileService } from './services/FileService';
 
 function App() {
   const [sidebarWidth, setSidebarWidth] = useState(280);
@@ -15,8 +16,7 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Lifecycle State
-  const { isProjectOpen, createProject, closeProject, loadState } = useSiteStore();
-  const { setTopologyData } = useTopologyStore();
+  const { isProjectOpen, createProject, closeProject } = useSiteStore();
 
   // --- Resize Logic ---
   const startResize = useCallback(() => { isDragging.current = true; document.body.style.cursor = 'col-resize'; }, []);
@@ -30,39 +30,34 @@ function App() {
   }, [resize, stopResize]);
 
   // --- Handlers ---
-  const handleNewProject = () => {
-      if (isProjectOpen && !confirm("Create new project? Unsaved changes will be lost.")) return;
-      createProject(); // Reset & Open
-      useTopologyStore.getState().clearAll(); // Clear topology too
-      setIsSiteManagerOpen(true); // Auto-open manager
+  
+  // FIX: Use FileService for New Project Flow (Handles Unsaved Changes Check)
+  const handleNewProject = async () => {
+      await FileService.newProjectFlow(() => setIsSiteManagerOpen(true));
   };
 
   const handleCloseProject = () => {
-      if (confirm("Close current project?")) {
+      // Use standard confirm for closing (or upgrade to UIStore confirm later if needed)
+      if (confirm("Close current project? Unsaved changes in memory will be lost.")) {
           closeProject();
       }
   };
 
-  const handleSave = async () => {
-    const data = await exportProject(useTopologyStore.getState(), useSiteStore.getState());
-    const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `mesh-project-${Date.now()}.mesh`; a.click(); URL.revokeObjectURL(url);
+  // Delegate Save to FileService
+  const handleSave = async () => { 
+      await FileService.handleSave(); 
   };
 
-  const handleLoad = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if(!file) return;
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-        try {
-            const { topology, site } = await importProject(ev.target?.result as string);
-            // Hydrate Stores
-            useTopologyStore.setState(topology);
-            loadState(site); // This sets isProjectOpen = true internally
-        } catch(err) { alert(err instanceof Error ? err.message : "Failed to open project."); }
-        if(fileInputRef.current) fileInputRef.current.value = '';
-    };
-    reader.readAsText(file);
+  // Delegate Load to FileService
+  const handleLoad = async (e: React.ChangeEvent<HTMLInputElement>) => { 
+      await FileService.handleFileSelect(e); 
+  };
+
+  // Trigger Open Flow (Check unsaved changes -> Click hidden input)
+  const handleOpenClick = () => {
+      if (fileInputRef.current) {
+          FileService.openFileFlow(fileInputRef.current);
+      }
   };
 
   return (
@@ -86,8 +81,8 @@ function App() {
                     <Plus size={14}/> New Project
                 </button>
 
-                {/* Open Project */}
-                <button onClick={() => fileInputRef.current?.click()} className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-md transition-colors flex items-center gap-2 font-medium">
+                {/* Open Project (Safe Async Flow) */}
+                <button onClick={handleOpenClick} className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-md transition-colors flex items-center gap-2 font-medium">
                     <FolderOpen size={14}/> Open Project
                 </button>
                 <input ref={fileInputRef} type="file" accept=".json,.mesh" className="hidden" onChange={handleLoad} />
@@ -101,18 +96,12 @@ function App() {
                         <button onClick={() => setIsSiteManagerOpen(true)} className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-md transition-colors flex items-center gap-2 font-medium">
                             <Settings size={14}/> Site Manager
                         </button>
-                
-                <button onClick={handleCloseProject} className="px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 rounded-md transition-colors flex items-center gap-2 font-medium">
-                    <LogOut size={14}/> Exit Project
-                </button>
+                         <button onClick={handleCloseProject} className="px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 rounded-md transition-colors flex items-center gap-2 font-medium">
+                            <LogOut size={14}/> Exit Project
+                        </button>
                     </>
                 )}
             </div>
-         </div>
-
-         {/* Right Controls */}
-         <div className="flex items-center gap-3">
-             
          </div>
       </div>
 
@@ -142,11 +131,9 @@ function App() {
                         alt="Mesh Studio" 
                         className="w-32 h-32 object-contain opacity-90 drop-shadow-xl"
                         onError={(e) => {
-                            // Fallback if logo missing
                             e.currentTarget.style.display = 'none';
                         }} 
                     />
-                    {/* Fallback Text if image fails (hidden by default image logic usually) */}
                 </div>
                 
                 <div className="space-y-2">
@@ -161,8 +148,9 @@ function App() {
                     >
                         <Plus size={18} /> Create New Project
                     </button>
+                    {/* Open Button on Start Page */}
                     <button 
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={handleOpenClick}
                         className="px-6 py-3 bg-white border border-gray-200 hover:border-blue-300 text-gray-700 hover:text-blue-600 rounded-lg shadow-sm hover:shadow-md transition-all flex items-center gap-2 font-medium"
                     >
                         <FolderOpen size={18} /> Open Existing
@@ -177,8 +165,9 @@ function App() {
         </div>
       )}
 
-      {/* Modals (Only render if project is open or needed) */}
+      {/* Modals */}
       {isSiteManagerOpen && isProjectOpen && <SiteManager onClose={() => setIsSiteManagerOpen(false)} />}
+      <ConfirmationDialog />
     </div>
   );
 }

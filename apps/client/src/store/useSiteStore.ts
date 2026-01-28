@@ -104,7 +104,7 @@ export const useSiteStore = create<SiteStore>()(
         return { buildings: newBs, activeFloorId: s.activeFloorId === fid ? null : s.activeFloorId };
       }),
 
-      updateFloor: (bid, fid, data) => set(s => ({ hasUnsavedChanges: true, 
+      updateFloor: (bid, fid, data) => set(s => ({ hasUnsavedChanges: true,  hasUnsavedChanges: true, 
         buildings: s.buildings.map(b => (b.id !== bid ? b : { ...b, floors: b.floors.map(f => f.id === fid ? { ...f, ...data } : f) }))
       })),
 
@@ -119,7 +119,7 @@ export const useSiteStore = create<SiteStore>()(
         }));
       },
 
-      updateNodePosition: (fid, nid, x, y) => set(s => ({ hasUnsavedChanges: true, 
+      updateNodePosition: (fid, nid, x, y) => set(s => ({ hasUnsavedChanges: true,  hasUnsavedChanges: true, 
         buildings: s.buildings.map(b => ({ ...b, floors: b.floors.map(f => {
             if(f.id !== fid) return f;
             const idx = f.nodes.findIndex(n => n.id === nid);
@@ -130,7 +130,7 @@ export const useSiteStore = create<SiteStore>()(
         })}))
       })),
 
-      updateNodeDescription: (fid, nid, description) => set(s => ({ hasUnsavedChanges: true, 
+      updateNodeDescription: (fid, nid, description) => set(s => ({ hasUnsavedChanges: true,  hasUnsavedChanges: true, 
         buildings: s.buildings.map(b => ({ ...b, floors: b.floors.map(f => {
             if(f.id !== fid) return f;
             const idx = f.nodes.findIndex(n => n.id === nid);
@@ -141,7 +141,7 @@ export const useSiteStore = create<SiteStore>()(
         })}))
       })),
 
-      updateNodeCategory: (fid, nid, category) => set(s => ({ hasUnsavedChanges: true, 
+      updateNodeCategory: (fid, nid, category) => set(s => ({ hasUnsavedChanges: true,  hasUnsavedChanges: true, 
         buildings: s.buildings.map(b => ({ ...b, floors: b.floors.map(f => {
             if(f.id !== fid) return f;
             const idx = f.nodes.findIndex(n => n.id === nid);
@@ -152,7 +152,7 @@ export const useSiteStore = create<SiteStore>()(
         })}))
       })),
 
-      removeNodeFromFloor: (fid, nid) => set(s => ({ hasUnsavedChanges: true, 
+      removeNodeFromFloor: (fid, nid) => set(s => ({ hasUnsavedChanges: true,  hasUnsavedChanges: true, 
         buildings: s.buildings.map(b => ({ ...b, floors: b.floors.map(f => f.id !== fid ? f : { ...f, nodes: f.nodes.filter(n => n.id !== nid) }) }))
       })),
 

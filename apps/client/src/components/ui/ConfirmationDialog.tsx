@@ -37,7 +37,7 @@ export const ConfirmationDialog = () => {
             onClick={() => closeDialog('DISCARD')}
             className="px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 rounded transition-colors flex items-center gap-1.5"
           >
-            <FileX size={14} /> Don't Save
+            <FileX size={14} /> Open Directly
           </button>
 
           <button 
