@@ -6,7 +6,7 @@ import useImage from 'use-image';
 import { useSiteStore } from '../store/useSiteStore';
 import { useTopologyStore } from '../store/useTopologyStore';
 import { getImage } from '../utils/storage';
-import { Layers, ZoomIn, Trash2, Eraser, X, Pencil, Type, Edit } from 'lucide-react';
+import { Layers, ZoomIn, Trash2, Eraser, X, Pencil, Type, Edit, Move } from 'lucide-react';
 import { BatchEditDialog } from './ui/BatchEditDialog';
 import { useMultiSelectStore } from '../store/useMultiSelectStore';
 
@@ -326,7 +326,7 @@ const Nodes = React.memo(({
 });
 
 export const FloorPlanEditor = () => {
-  const { buildings, activeBuildingId, activeFloorId, setActiveView, getActiveFloor, updateNodePosition, updateNodeDescription, updateNodeCategory, removeNodeFromFloor, nodeScale, setNodeScale, baseFontSize, setBaseFontSize, viewState, setViewState, updateNodeCategories } = useSiteStore();
+  const { buildings, activeBuildingId, activeFloorId, setActiveView, getActiveFloor, updateNodePosition, updateNodeDescription, updateNodeCategory, removeNodeFromFloor, nodeScale, setNodeScale, baseFontSize, setBaseFontSize, viewState, setViewState, updateNodeCategories, removeNodesByDeviceIds } = useSiteStore();
   const { unassignedDevices, clearDeviceSelection } = useTopologyStore();
   const { selectedNodeIds, addSelectedNodeId, removeSelectedNodeId, clearSelectedNodeIds } = useMultiSelectStore();
 
@@ -380,6 +380,15 @@ export const FloorPlanEditor = () => {
     clearSelectedNodeIds();
     setIsMultiSelectMode(false);
   };
+    
+  const handleBatchDelete = () => {
+    if (activeFloorId && selectedNodeIds.length > 0) {
+        removeNodesByDeviceIds(selectedNodeIds);
+    }
+    setBatchEditModalVisible(false);
+    clearSelectedNodeIds();
+    setIsMultiSelectMode(false);
+  }
 
   const handleWheel = (e: any) => {
     e.evt.preventDefault();
@@ -431,6 +440,13 @@ export const FloorPlanEditor = () => {
   const handleDragEndNode = useCallback(() => {
       dragTargetRef.current = null;
   }, []);
+    
+  const handleSingleDelete = () => {
+    if (propertyModal.nodeId && activeFloorId) {
+        removeNodeFromFloor(activeFloorId, propertyModal.nodeId);
+        setPropertyModal({ visible: false, x: 0, y: 0, nodeId: null });
+    }
+  }
 
   return (
     <div className="flex flex-col h-full bg-gray-100 relative">
@@ -442,7 +458,7 @@ export const FloorPlanEditor = () => {
         
         {selectedNodeIds.length > 1 && (
             <button onClick={() => setBatchEditModalVisible(true)} className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-all bg-indigo-600 text-white hover:bg-indigo-700`}>
-                <Edit size={14} /> Batch Edit ({selectedNodeIds.length})
+                <Edit size={14} /> Batch Actions ({selectedNodeIds.length})
             </button>
         )}
 
@@ -450,9 +466,6 @@ export const FloorPlanEditor = () => {
           <Pencil size={14} /> {isMultiSelectMode ? 'Select Mode ON' : 'Select'}
         </button>
 
-        <button onClick={() => setIsDeleteMode(!isDeleteMode)} className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${isDeleteMode ? 'bg-red-100 text-red-600 border border-red-200 ring-2 ring-red-500/20' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-          {isDeleteMode ? <Eraser size={14} /> : <Trash2 size={14} />} {isDeleteMode ? 'Delete Mode ON' : 'Delete'}
-        </button>
         <div className="flex items-center gap-4 text-xs text-gray-500">
             <div className="flex items-center gap-2"><span>Scale</span><input type="range" min="0.5" max="3" step="0.1" value={nodeScale} onChange={(e) => setNodeScale(parseFloat(e.target.value))} className="w-24 accent-indigo-600 cursor-pointer"/></div>
             <div className="flex items-center gap-2"><Type size={14} /><span>Font</span><input type="range" min="8" max="48" step="1" value={baseFontSize} onChange={(e) => setBaseFontSize(parseInt(e.target.value))} className="w-24 accent-indigo-600 cursor-pointer"/></div>
@@ -496,6 +509,7 @@ export const FloorPlanEditor = () => {
               show={batchEditModalVisible}
               onClose={() => setBatchEditModalVisible(false)}
               onSave={handleBatchEditSave}
+              onDelete={handleBatchDelete}
               categories={[
                 { value: "", label: "Default (Green Circle)" },
                 { value: "heat-mult", label: "Heat or Mult Detector" },
@@ -547,7 +561,8 @@ export const FloorPlanEditor = () => {
                                 <option value="sounder">Sounder</option>
                             </select>
                         </div>
-                        <div className="flex justify-end">
+                        <div className="flex justify-between items-center">
+                            <button className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded text-sm font-medium" onClick={handleSingleDelete}>Delete</button>
                             <button className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-sm font-medium" onClick={() => setPropertyModal({ ...propertyModal, visible: false })}>Confirm</button>
                         </div>
                     </div>
